@@ -9,6 +9,7 @@
     <h1>Wahoo KICKR Dashboard</h1>
     <button id="connectButton">Scan for KICKR</button>
     <p id="status">Status: Disconnected</p>
+    <p id="version">Version bluebottle</p>
     
     <p>Target Power (Watts): <span id="targetWatts">100</span></p>
     <button id="decreaseButton" aria-label="Decrease target power by 10 watts">Minus 10</button>
@@ -16,6 +17,7 @@
     
     <p id="currentPower">Current: --</p>
     <p id="cadenceDisplay">Cadence (RPM): --</p>
+    <p id="debugInfo">Debug: --</p>
     
     <script>
 const connectButton = document.getElementById('connectButton');
@@ -23,6 +25,7 @@ const statusText = document.getElementById('status');
 const targetWattsSpan = document.getElementById('targetWatts');
 const currentPowerDisplay = document.getElementById('currentPower');
 const cadenceDisplay = document.getElementById('cadenceDisplay');
+const debugInfo = document.getElementById('debugInfo');
 const decreaseButton = document.getElementById('decreaseButton');
 const increaseButton = document.getElementById('increaseButton');
 
@@ -36,18 +39,18 @@ let trainerCharacteristic = null;
 
 async function sendPowerTarget(watts) {
     if (!trainerCharacteristic) {
-        console.log("Trainer not connected for control");
+        debugInfo.textContent = "Debug: No trainer control available";
         return;
     }
     
     try {
-        // Command format from your Python script: [0x42, low_byte, high_byte]
         const cmd = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
         await trainerCharacteristic.writeValue(cmd);
-        console.log(`Sent target power: ${watts}W`);
+        debugInfo.textContent = `Debug: Sent ${watts}W command`;
+        console.log(`Sent target power: ${watts}W, bytes: ${Array.from(cmd).map(b => '0x'+b.toString(16)).join(' ')}`);
     } catch (error) {
         console.error("Error sending power command:", error);
-        statusText.textContent = "Status: Error setting power - " + error.message;
+        debugInfo.textContent = `Debug: Error - ${error.message}`;
     }
 }
 
@@ -82,34 +85,32 @@ connectButton.addEventListener('click', async () => {
         
         await new Promise(resolve => setTimeout(resolve, 1500));
         
-        // Get power measurement service
         const powerService = await server.getPrimaryService(CYCLING_POWER_SERVICE);
         const powerCharacteristic = await powerService.getCharacteristic(POWER_MEASUREMENT_CHAR);
         
-        // Try to get trainer control service
+        // Try to get trainer control
         try {
             statusText.textContent = "Status: Accessing trainer control...";
             const trainerService = await server.getPrimaryService(WAHOO_TRAINER_SERVICE);
             trainerCharacteristic = await trainerService.getCharacteristic(WAHOO_TRAINER_CHAR);
             
-            // Send unlock command (from your Python script)
             statusText.textContent = "Status: Unlocking trainer...";
             const unlockCmd = new Uint8Array([0x20, 0xEE, 0xFC]);
             await trainerCharacteristic.writeValue(unlockCmd);
+            console.log("Sent unlock command");
             
             await new Promise(resolve => setTimeout(resolve, 1000));
             
-            // Set initial target power
             await sendPowerTarget(targetWatts);
             
             statusText.textContent = "Status: Connected with control!";
         } catch (controlError) {
             console.log("Trainer control not available:", controlError);
-            statusText.textContent = "Status: Connected (read-only mode)";
+            statusText.textContent = "Status: Connected (read-only)";
+            debugInfo.textContent = "Debug: Control unavailable";
             trainerCharacteristic = null;
         }
         
-        // Start receiving power/cadence data
         await powerCharacteristic.startNotifications();
         
         powerCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
@@ -118,11 +119,31 @@ connectButton.addEventListener('click', async () => {
             const watts = value.getUint16(2, true);
             currentPowerDisplay.textContent = `Current: ${watts}`;
             
-            // Read cadence and divide by 2
-            if (value.byteLength >= 6 && (flags & 0x04)) {
-                const rawCadence = value.getUint16(4, true);
-                const actualCadence = Math.round(rawCadence / 2);
-                if (actualCadence > 0 && actualCadence < 200) {
+            // Log the raw data to figure out cadence location
+            const bytes = [];
+            for (let i = 0; i < value.byteLength; i++) {
+                bytes.push(value.getUint8(i));
+            }
+            console.log('Power data:', bytes.map(b => b.toString(16).padStart(2, '0')).join(' '), 'flags:', flags.toString(2));
+            
+            // Try different interpretations of cadence
+            if (value.byteLength >= 7) {
+                // Some devices put cadence at byte 6-7
+                const cadence1 = value.getUint16(4, true);
+                const cadence2 = value.getUint16(6, true);
+                console.log('Possible cadence values: @4:', cadence1, '@6:', cadence2);
+                
+                // Use the one that seems more reasonable (30-150 RPM range)
+                let actualCadence = null;
+                if (cadence2 > 30 && cadence2 < 150) {
+                    actualCadence = cadence2;
+                } else if (cadence1 > 30 && cadence1 < 150) {
+                    actualCadence = cadence1;
+                } else if (cadence1 / 2 > 30 && cadence1 / 2 < 150) {
+                    actualCadence = Math.round(cadence1 / 2);
+                }
+                
+                if (actualCadence) {
                     cadenceDisplay.textContent = `Cadence (RPM): ${actualCadence}`;
                 }
             }
@@ -132,6 +153,7 @@ connectButton.addEventListener('click', async () => {
             statusText.textContent = "Status: Disconnected. Please scan again.";
             currentPowerDisplay.textContent = "Current: --";
             cadenceDisplay.textContent = "Cadence (RPM): --";
+            debugInfo.textContent = "Debug: --";
             trainerCharacteristic = null;
         });
         
