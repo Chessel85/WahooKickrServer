@@ -28,7 +28,8 @@ connectButton.addEventListener('click', async () => {
         // We filter for KICKR but must declare the service as 'optional' 
         // so the browser is allowed to access it after connection.
         const device = await navigator.bluetooth.requestDevice({
-            filters: [{ namePrefix: 'KICKR' }],
+            // This tells the phone: "Show me everything you see"
+            acceptAllDevices: true,
             optionalServices: [CYCLING_POWER_SERVICE]
         });
 
