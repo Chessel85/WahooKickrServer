@@ -25,6 +25,12 @@ connectButton.addEventListener('click', async () => {
         });
 
         const server = await device.gatt.connect();
+        statusText.textContent = "Status: Connected. Waiting for KICKR...";
+        
+        // Add a 1-second pause to let the connection stabilize
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        const service = await server.getPrimaryService(0x1818);
         statusText.textContent = "Status: Connected. Fetching Power...";
 
         // 1. Get the Cycling Power Service
