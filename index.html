@@ -11,28 +11,29 @@
     <ul id="deviceList"></ul>
 
     <script>
-        const connectButton = document.getElementById('connectButton');
-        const statusText = document.getElementById('status');
+const connectButton = document.getElementById('connectButton');
+const statusText = document.getElementById('status');
 
-        connectButton.addEventListener('click', async () => {
-            try {
-                statusText.textContent = "Status: Searching...";
-                
-                // This looks for devices supporting the Fitness Machine Service
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: ['fitness_machine'] }]
-                });
-
-                statusText.textContent = `Status: Found ${device.name}`;
-                
-                const server = await device.gatt.connect();
-                statusText.textContent = `Status: Connected to ${device.name}`;
-
-            } catch (error) {
-                statusText.textContent = "Status: Error - " + error;
-                console.error(error);
-            }
+connectButton.addEventListener('click', async () => {
+    try {
+        statusText.textContent = "Status: Opening selector...";
+        
+        // This "acceptAllDevices" tells the phone to show everything it sees
+        const device = await navigator.bluetooth.requestDevice({
+            acceptAllDevices: true,
+            optionalServices: ['00001826-0000-1000-8000-00805f9b34fb', '00001818-0000-1000-8000-00805f9b34fb']
         });
+
+        statusText.textContent = `Status: Connecting to ${device.name}...`;
+        
+        const server = await device.gatt.connect();
+        statusText.textContent = `Status: Success! Connected to ${device.name}`;
+
+    } catch (error) {
+        statusText.textContent = "Status: Error - " + error;
+        console.error(error);
+    }
+});
     </script>
 </body>
 </html>
