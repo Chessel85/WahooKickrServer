@@ -13,25 +13,40 @@
     <script>
 const connectButton = document.getElementById('connectButton');
 const statusText = document.getElementById('status');
+const powerDisplay = document.createElement('h2'); // We'll add a big display for watts
+document.body.appendChild(powerDisplay);
+powerDisplay.textContent = "Watts: --";
 
 connectButton.addEventListener('click', async () => {
     try {
-        statusText.textContent = "Status: Opening selector...";
-        
-        // This "acceptAllDevices" tells the phone to show everything it sees
+        statusText.textContent = "Status: Searching...";
         const device = await navigator.bluetooth.requestDevice({
-            acceptAllDevices: true,
-            optionalServices: ['00001826-0000-1000-8000-00805f9b34fb', '00001818-0000-1000-8000-00805f9b34fb']
+            filters: [{ services: [0x1818] }] // 0x1818 is the standard Cycling Power Service
         });
 
-        statusText.textContent = `Status: Connecting to ${device.name}...`;
-        
         const server = await device.gatt.connect();
-        statusText.textContent = `Status: Success! Connected to ${device.name}`;
+        statusText.textContent = "Status: Connected. Fetching Power...";
+
+        // 1. Get the Cycling Power Service
+        const service = await server.getPrimaryService(0x1818);
+
+        // 2. Get the Power Measurement Characteristic
+        const characteristic = await service.getCharacteristic(0x1817);
+
+        // 3. Start listening for data
+        await characteristic.startNotifications();
+        
+        statusText.textContent = "Status: Receiving Data!";
+
+        characteristic.addEventListener('characteristicvaluechanged', (event) => {
+            const value = event.target.value;
+            // The Bluetooth standard says Power is a 16-bit integer at offset 2
+            const watts = value.getUint16(2, true); 
+            powerDisplay.textContent = `Watts: ${watts}`;
+        });
 
     } catch (error) {
         statusText.textContent = "Status: Error - " + error;
-        console.error(error);
     }
 });
     </script>
