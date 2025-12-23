@@ -2,59 +2,58 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>KICKR Control</title>
 </head>
 <body>
     <h1>Wahoo KICKR Dashboard</h1>
     <button id="connectButton">Scan for KICKR</button>
     <p id="status">Status: Disconnected</p>
-    <ul id="deviceList"></ul>
+    <h2 id="powerDisplay">Watts: --</h2>
 
     <script>
-const connectButton = document.getElementById('connectButton');
-const statusText = document.getElementById('status');
-const powerDisplay = document.createElement('h2'); // We'll add a big display for watts
-document.body.appendChild(powerDisplay);
-powerDisplay.textContent = "Watts: --";
+        const connectButton = document.getElementById('connectButton');
+        const statusText = document.getElementById('status');
+        const powerDisplay = document.getElementById('powerDisplay');
 
-connectButton.addEventListener('click', async () => {
-    try {
-        statusText.textContent = "Status: Searching...";
-        const device = await navigator.bluetooth.requestDevice({
-            filters: [{ services: [0x1818] }] // 0x1818 is the standard Cycling Power Service
+        connectButton.addEventListener('click', async () => {
+            try {
+                // Clear any previous error text
+                statusText.textContent = "Status: Searching...";
+                
+                // Using the standard UUID for Cycling Power
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [0x1818] }]
+                });
+
+                statusText.textContent = "Status: Connecting to " + device.name;
+                const server = await device.gatt.connect();
+                
+                statusText.textContent = "Status: Handshaking...";
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                // ONLY ONE SERVICE DECLARATION HERE
+                const cyclingService = await server.getPrimaryService(0x1818);
+                
+                statusText.textContent = "Status: Finding Power Room...";
+                const characteristic = await cyclingService.getCharacteristic(0x1817);
+
+                await characteristic.startNotifications();
+                statusText.textContent = "Status: Receiving Data!";
+
+                characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    const value = event.target.value;
+                    // Read 16-bit power value at offset 2
+                    const watts = value.getUint16(2, true); 
+                    powerDisplay.textContent = `Watts: ${watts}`;
+                });
+
+            } catch (error) {
+                // This will tell us if it's a Permission error or a Code error
+                statusText.textContent = "Status: Error - " + error;
+                console.error(error);
+            }
         });
-
-        const server = await device.gatt.connect();
-        statusText.textContent = "Status: Connected. Waiting for KICKR...";
-        
-        // Add a 1-second pause to let the connection stabilize
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        const service = await server.getPrimaryService(0x1818);
-        statusText.textContent = "Status: Connected. Fetching Power...";
-
-        // 1. Get the Cycling Power Service
-        const service = await server.getPrimaryService(0x1818);
-
-        // 2. Get the Power Measurement Characteristic
-        const characteristic = await service.getCharacteristic(0x1817);
-
-        // 3. Start listening for data
-        await characteristic.startNotifications();
-        
-        statusText.textContent = "Status: Receiving Data!";
-
-        characteristic.addEventListener('characteristicvaluechanged', (event) => {
-            const value = event.target.value;
-            // The Bluetooth standard says Power is a 16-bit integer at offset 2
-            const watts = value.getUint16(2, true); 
-            powerDisplay.textContent = `Watts: ${watts}`;
-        });
-
-    } catch (error) {
-        statusText.textContent = "Status: Error - " + error;
-    }
-});
     </script>
 </body>
 </html>
