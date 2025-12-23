@@ -17,7 +17,12 @@
     
     <p id="currentPower">Current: --</p>
     <p id="cadenceDisplay">Cadence (RPM): --</p>
-    <p id="debugInfo">Debug: --</p>
+    
+    <h2>Debug Information</h2>
+    <p id="controlStatus">Control: Not connected</p>
+    <p id="lastCommand">Last command: None</p>
+    <p id="dataInfo">Data packets: 0</p>
+    <p id="cadenceDebug">Cadence data: Not available</p>
     
     <script>
 const connectButton = document.getElementById('connectButton');
@@ -25,7 +30,10 @@ const statusText = document.getElementById('status');
 const targetWattsSpan = document.getElementById('targetWatts');
 const currentPowerDisplay = document.getElementById('currentPower');
 const cadenceDisplay = document.getElementById('cadenceDisplay');
-const debugInfo = document.getElementById('debugInfo');
+const controlStatus = document.getElementById('controlStatus');
+const lastCommand = document.getElementById('lastCommand');
+const dataInfo = document.getElementById('dataInfo');
+const cadenceDebug = document.getElementById('cadenceDebug');
 const decreaseButton = document.getElementById('decreaseButton');
 const increaseButton = document.getElementById('increaseButton');
 
@@ -36,21 +44,21 @@ const WAHOO_TRAINER_CHAR = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
 
 let targetWatts = 100;
 let trainerCharacteristic = null;
+let packetCount = 0;
 
 async function sendPowerTarget(watts) {
     if (!trainerCharacteristic) {
-        debugInfo.textContent = "Debug: No trainer control available";
+        lastCommand.textContent = "Last command: Failed - no control connection";
         return;
     }
     
     try {
         const cmd = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
         await trainerCharacteristic.writeValue(cmd);
-        debugInfo.textContent = `Debug: Sent ${watts}W command`;
-        console.log(`Sent target power: ${watts}W, bytes: ${Array.from(cmd).map(b => '0x'+b.toString(16)).join(' ')}`);
+        const cmdHex = Array.from(cmd).map(b => b.toString(16).padStart(2, '0')).join(' ');
+        lastCommand.textContent = `Last command: Set ${watts}W (bytes: ${cmdHex})`;
     } catch (error) {
-        console.error("Error sending power command:", error);
-        debugInfo.textContent = `Debug: Error - ${error.message}`;
+        lastCommand.textContent = `Last command: Error - ${error.message}`;
     }
 }
 
@@ -69,6 +77,7 @@ increaseButton.addEventListener('click', async () => {
 connectButton.addEventListener('click', async () => {
     try {
         statusText.textContent = "Status: Searching...";
+        packetCount = 0;
         
         const device = await navigator.bluetooth.requestDevice({
             filters: [{
@@ -94,10 +103,13 @@ connectButton.addEventListener('click', async () => {
             const trainerService = await server.getPrimaryService(WAHOO_TRAINER_SERVICE);
             trainerCharacteristic = await trainerService.getCharacteristic(WAHOO_TRAINER_CHAR);
             
+            controlStatus.textContent = "Control: Found trainer service";
+            
             statusText.textContent = "Status: Unlocking trainer...";
             const unlockCmd = new Uint8Array([0x20, 0xEE, 0xFC]);
             await trainerCharacteristic.writeValue(unlockCmd);
-            console.log("Sent unlock command");
+            
+            controlStatus.textContent = "Control: Unlocked successfully";
             
             await new Promise(resolve => setTimeout(resolve, 1000));
             
@@ -105,9 +117,8 @@ connectButton.addEventListener('click', async () => {
             
             statusText.textContent = "Status: Connected with control!";
         } catch (controlError) {
-            console.log("Trainer control not available:", controlError);
             statusText.textContent = "Status: Connected (read-only)";
-            debugInfo.textContent = "Debug: Control unavailable";
+            controlStatus.textContent = `Control: Unavailable - ${controlError.message}`;
             trainerCharacteristic = null;
         }
         
@@ -115,37 +126,47 @@ connectButton.addEventListener('click', async () => {
         
         powerCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
             const value = event.target.value;
+            packetCount++;
+            
             const flags = value.getUint8(0);
             const watts = value.getUint16(2, true);
             currentPowerDisplay.textContent = `Current: ${watts}`;
             
-            // Log the raw data to figure out cadence location
+            // Log raw bytes
             const bytes = [];
             for (let i = 0; i < value.byteLength; i++) {
-                bytes.push(value.getUint8(i));
+                bytes.push(value.getUint8(i).toString(16).padStart(2, '0'));
             }
-            console.log('Power data:', bytes.map(b => b.toString(16).padStart(2, '0')).join(' '), 'flags:', flags.toString(2));
+            dataInfo.textContent = `Data packets: ${packetCount}, Length: ${value.byteLength} bytes, Raw: ${bytes.join(' ')}`;
             
-            // Try different interpretations of cadence
-            if (value.byteLength >= 7) {
-                // Some devices put cadence at byte 6-7
-                const cadence1 = value.getUint16(4, true);
-                const cadence2 = value.getUint16(6, true);
-                console.log('Possible cadence values: @4:', cadence1, '@6:', cadence2);
+            // Try to parse cadence from different positions
+            let cadenceInfo = "Not found in packet";
+            let bestCadence = null;
+            
+            if (value.byteLength >= 6) {
+                const pos4 = value.getUint16(4, true);
+                const pos6 = value.byteLength >= 8 ? value.getUint16(6, true) : null;
                 
-                // Use the one that seems more reasonable (30-150 RPM range)
-                let actualCadence = null;
-                if (cadence2 > 30 && cadence2 < 150) {
-                    actualCadence = cadence2;
-                } else if (cadence1 > 30 && cadence1 < 150) {
-                    actualCadence = cadence1;
-                } else if (cadence1 / 2 > 30 && cadence1 / 2 < 150) {
-                    actualCadence = Math.round(cadence1 / 2);
+                cadenceInfo = `Position 4: ${pos4}`;
+                if (pos6 !== null) {
+                    cadenceInfo += `, Position 6: ${pos6}`;
                 }
                 
-                if (actualCadence) {
-                    cadenceDisplay.textContent = `Cadence (RPM): ${actualCadence}`;
+                // Pick most reasonable cadence value
+                if (pos6 !== null && pos6 > 30 && pos6 < 150) {
+                    bestCadence = pos6;
+                } else if (pos4 > 30 && pos4 < 150) {
+                    bestCadence = pos4;
+                } else if (pos4 / 2 > 30 && pos4 / 2 < 150) {
+                    bestCadence = Math.round(pos4 / 2);
+                    cadenceInfo += ` (using halved value)`;
                 }
+            }
+            
+            cadenceDebug.textContent = `Cadence data: ${cadenceInfo}`;
+            
+            if (bestCadence) {
+                cadenceDisplay.textContent = `Cadence (RPM): ${bestCadence}`;
             }
         });
         
@@ -153,13 +174,16 @@ connectButton.addEventListener('click', async () => {
             statusText.textContent = "Status: Disconnected. Please scan again.";
             currentPowerDisplay.textContent = "Current: --";
             cadenceDisplay.textContent = "Cadence (RPM): --";
-            debugInfo.textContent = "Debug: --";
+            controlStatus.textContent = "Control: Not connected";
+            lastCommand.textContent = "Last command: None";
+            dataInfo.textContent = "Data packets: 0";
+            cadenceDebug.textContent = "Cadence data: Not available";
             trainerCharacteristic = null;
         });
         
     } catch (error) {
         statusText.textContent = "Status: Error - " + (error.message || "Unknown error");
-        console.error("Bluetooth Error:", error);
+        controlStatus.textContent = `Control: Connection failed - ${error.message}`;
     }
 });
     </script>
