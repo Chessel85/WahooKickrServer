@@ -10,63 +10,58 @@
     <button id="connectButton">Scan for KICKR</button>
     <p id="status">Status: Disconnected</p>
     <h2 id="powerDisplay">Watts: --</h2>
-
     <script>
 const connectButton = document.getElementById('connectButton');
 const statusText = document.getElementById('status');
 const powerDisplay = document.getElementById('powerDisplay');
 
-// Official Bluetooth SIG UUIDs for Cycling Power
+// Correct UUIDs
 const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
-const POWER_MEASUREMENT_CHAR = '00001817-0000-1000-8000-00805f9b34fb';
+const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
 
 connectButton.addEventListener('click', async () => {
     try {
         statusText.textContent = "Status: Searching...";
-
-        // Broadest possible search to avoid empty lists
+        
+        // Request device with specific service filter
         const device = await navigator.bluetooth.requestDevice({
-            acceptAllDevices: true,
+            filters: [{
+                services: [CYCLING_POWER_SERVICE]
+            }],
             optionalServices: [CYCLING_POWER_SERVICE]
         });
-
-        // We avoid device.name here to prevent "undefined" errors
-        statusText.textContent = "Status: KICKR Selected. Connecting...";
+        
+        const deviceName = device.name || "KICKR Device";
+        statusText.textContent = `Status: ${deviceName} Selected. Connecting...`;
         
         const server = await device.gatt.connect();
-
         statusText.textContent = "Status: Handshaking with Trainer...";
-        // 1.5 second pause allows the KICKR to stabilize the GATT server
+        
         await new Promise(resolve => setTimeout(resolve, 1500));
-
+        
         const service = await server.getPrimaryService(CYCLING_POWER_SERVICE);
         const characteristic = await service.getCharacteristic(POWER_MEASUREMENT_CHAR);
-
-        // Start listening for the power data packets
+        
         await characteristic.startNotifications();
         statusText.textContent = "Status: Receiving Data!";
-
+        
         characteristic.addEventListener('characteristicvaluechanged', (event) => {
             const value = event.target.value;
-            // The Power value (Watts) is a 16-bit integer starting at the 3rd byte (index 2)
             const watts = value.getUint16(2, true);
             powerDisplay.textContent = `Watts: ${watts}`;
             
-            // Periodically update status so VoiceOver confirms the connection is alive
             if (statusText.textContent !== "Status: Data Live") {
                 statusText.textContent = "Status: Data Live";
             }
         });
-
-        // Auto-cleanup if the connection drops
+        
         device.addEventListener('gattserverdisconnected', () => {
             statusText.textContent = "Status: Disconnected. Please scan again.";
             powerDisplay.textContent = "Watts: --";
         });
-
+        
     } catch (error) {
-        // Detailed error reporting for troubleshooting
-        statusText.textContent = "Status: Error - " + error.message;
+        statusText.textContent = "Status: Error - " + (error.message || "Unknown error");
         console.error("Bluetooth Error:", error);
     }
 });
