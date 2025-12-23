@@ -28,17 +28,39 @@ const increaseButton = document.getElementById('increaseButton');
 
 const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
 const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
+const WAHOO_TRAINER_SERVICE = 'a026ee0d-0a7d-4ab3-97fa-f1500f9feb8b';
+const WAHOO_TRAINER_CHAR = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
 
 let targetWatts = 100;
+let trainerCharacteristic = null;
 
-decreaseButton.addEventListener('click', () => {
+async function sendPowerTarget(watts) {
+    if (!trainerCharacteristic) {
+        console.log("Trainer not connected for control");
+        return;
+    }
+    
+    try {
+        // Command format from your Python script: [0x42, low_byte, high_byte]
+        const cmd = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
+        await trainerCharacteristic.writeValue(cmd);
+        console.log(`Sent target power: ${watts}W`);
+    } catch (error) {
+        console.error("Error sending power command:", error);
+        statusText.textContent = "Status: Error setting power - " + error.message;
+    }
+}
+
+decreaseButton.addEventListener('click', async () => {
     targetWatts = Math.max(10, targetWatts - 10);
     targetWattsSpan.textContent = targetWatts;
+    await sendPowerTarget(targetWatts);
 });
 
-increaseButton.addEventListener('click', () => {
+increaseButton.addEventListener('click', async () => {
     targetWatts += 10;
     targetWattsSpan.textContent = targetWatts;
+    await sendPowerTarget(targetWatts);
 });
 
 connectButton.addEventListener('click', async () => {
@@ -49,7 +71,7 @@ connectButton.addEventListener('click', async () => {
             filters: [{
                 services: [CYCLING_POWER_SERVICE]
             }],
-            optionalServices: [CYCLING_POWER_SERVICE]
+            optionalServices: [CYCLING_POWER_SERVICE, WAHOO_TRAINER_SERVICE]
         });
         
         const deviceName = device.name || "KICKR Device";
@@ -60,37 +82,49 @@ connectButton.addEventListener('click', async () => {
         
         await new Promise(resolve => setTimeout(resolve, 1500));
         
-        const service = await server.getPrimaryService(CYCLING_POWER_SERVICE);
-        const characteristic = await service.getCharacteristic(POWER_MEASUREMENT_CHAR);
+        // Get power measurement service
+        const powerService = await server.getPrimaryService(CYCLING_POWER_SERVICE);
+        const powerCharacteristic = await powerService.getCharacteristic(POWER_MEASUREMENT_CHAR);
         
-        await characteristic.startNotifications();
-        statusText.textContent = "Status: Receiving Data!";
+        // Try to get trainer control service
+        try {
+            statusText.textContent = "Status: Accessing trainer control...";
+            const trainerService = await server.getPrimaryService(WAHOO_TRAINER_SERVICE);
+            trainerCharacteristic = await trainerService.getCharacteristic(WAHOO_TRAINER_CHAR);
+            
+            // Send unlock command (from your Python script)
+            statusText.textContent = "Status: Unlocking trainer...";
+            const unlockCmd = new Uint8Array([0x20, 0xEE, 0xFC]);
+            await trainerCharacteristic.writeValue(unlockCmd);
+            
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Set initial target power
+            await sendPowerTarget(targetWatts);
+            
+            statusText.textContent = "Status: Connected with control!";
+        } catch (controlError) {
+            console.log("Trainer control not available:", controlError);
+            statusText.textContent = "Status: Connected (read-only mode)";
+            trainerCharacteristic = null;
+        }
         
-        characteristic.addEventListener('characteristicvaluechanged', (event) => {
+        // Start receiving power/cadence data
+        await powerCharacteristic.startNotifications();
+        
+        powerCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
             const value = event.target.value;
             const flags = value.getUint8(0);
             const watts = value.getUint16(2, true);
             currentPowerDisplay.textContent = `Current: ${watts}`;
             
-            // Try to read cadence - logging to see what data we're getting
-            console.log('Data length:', value.byteLength, 'Flags:', flags.toString(2));
-            
-            // Different possible cadence locations
-            if (value.byteLength >= 6) {
-                // Try reading as if cadence flag is set
-                if (flags & 0x04) {
-                    const cadence = value.getUint16(4, true);
-                    console.log('Cadence (method 1):', cadence);
-                    if (cadence > 0 && cadence < 300) {
-                        cadenceDisplay.textContent = `Cadence (RPM): ${cadence}`;
-                    }
+            // Read cadence and divide by 2
+            if (value.byteLength >= 6 && (flags & 0x04)) {
+                const rawCadence = value.getUint16(4, true);
+                const actualCadence = Math.round(rawCadence / 2);
+                if (actualCadence > 0 && actualCadence < 200) {
+                    cadenceDisplay.textContent = `Cadence (RPM): ${actualCadence}`;
                 }
-            }
-            
-            // Alternative: try reading from different byte positions
-            if (value.byteLength >= 8) {
-                const altCadence = value.getUint16(6, true);
-                console.log('Alt cadence position:', altCadence);
             }
         });
         
@@ -98,6 +132,7 @@ connectButton.addEventListener('click', async () => {
             statusText.textContent = "Status: Disconnected. Please scan again.";
             currentPowerDisplay.textContent = "Current: --";
             cadenceDisplay.textContent = "Cadence (RPM): --";
+            trainerCharacteristic = null;
         });
         
     } catch (error) {
