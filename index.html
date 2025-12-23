@@ -9,7 +9,7 @@
     <h1>Wahoo KICKR Dashboard</h1>
     <button id="connectButton">Scan for KICKR</button>
     <p id="status">Status: Disconnected</p>
-    <p id="version">Version greenbottle</p>
+    <p id="version">Version blackbear</p>
     
     <p>Target Power (Watts): <span id="targetWatts">100</span></p>
     <button id="decreaseButton" aria-label="Decrease target power by 10 watts">Minus 10</button>
@@ -18,11 +18,9 @@
     <p id="currentPower">Current: --</p>
     <p id="cadenceDisplay">Cadence (RPM): --</p>
     
-    <h2>Debug Information</h2>
-    <p id="controlStatus">Control: Not connected</p>
-    <p id="lastCommand">Last command: None</p>
-    <p id="dataInfo">Data packets: 0</p>
-    <p id="cadenceDebug">Cadence data: Not available</p>
+    <h2>Debug Log (persists after disconnect)</h2>
+    <button id="clearLog">Clear Debug Log</button>
+    <div id="debugLog" role="log" aria-live="off"></div>
     
     <script>
 const connectButton = document.getElementById('connectButton');
@@ -30,10 +28,8 @@ const statusText = document.getElementById('status');
 const targetWattsSpan = document.getElementById('targetWatts');
 const currentPowerDisplay = document.getElementById('currentPower');
 const cadenceDisplay = document.getElementById('cadenceDisplay');
-const controlStatus = document.getElementById('controlStatus');
-const lastCommand = document.getElementById('lastCommand');
-const dataInfo = document.getElementById('dataInfo');
-const cadenceDebug = document.getElementById('cadenceDebug');
+const debugLog = document.getElementById('debugLog');
+const clearLogButton = document.getElementById('clearLog');
 const decreaseButton = document.getElementById('decreaseButton');
 const increaseButton = document.getElementById('increaseButton');
 
@@ -46,9 +42,26 @@ let targetWatts = 100;
 let trainerCharacteristic = null;
 let packetCount = 0;
 
+// For cadence calculation
+let lastRevCount = null;
+let lastRevTime = null;
+
+function addLog(message) {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = document.createElement('p');
+    logEntry.textContent = `[${timestamp}] ${message}`;
+    debugLog.appendChild(logEntry);
+    console.log(message);
+}
+
+clearLogButton.addEventListener('click', () => {
+    debugLog.innerHTML = '';
+    addLog('Debug log cleared');
+});
+
 async function sendPowerTarget(watts) {
     if (!trainerCharacteristic) {
-        lastCommand.textContent = "Last command: Failed - no control connection";
+        addLog(`Command failed: No trainer control available`);
         return;
     }
     
@@ -56,9 +69,9 @@ async function sendPowerTarget(watts) {
         const cmd = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
         await trainerCharacteristic.writeValue(cmd);
         const cmdHex = Array.from(cmd).map(b => b.toString(16).padStart(2, '0')).join(' ');
-        lastCommand.textContent = `Last command: Set ${watts}W (bytes: ${cmdHex})`;
+        addLog(`Command sent: Set ${watts}W (bytes: ${cmdHex})`);
     } catch (error) {
-        lastCommand.textContent = `Last command: Error - ${error.message}`;
+        addLog(`Command error: ${error.message}`);
     }
 }
 
@@ -77,7 +90,10 @@ increaseButton.addEventListener('click', async () => {
 connectButton.addEventListener('click', async () => {
     try {
         statusText.textContent = "Status: Searching...";
+        addLog('=== NEW CONNECTION ATTEMPT ===');
         packetCount = 0;
+        lastRevCount = null;
+        lastRevTime = null;
         
         const device = await navigator.bluetooth.requestDevice({
             filters: [{
@@ -88,14 +104,17 @@ connectButton.addEventListener('click', async () => {
         
         const deviceName = device.name || "KICKR Device";
         statusText.textContent = `Status: ${deviceName} Selected. Connecting...`;
+        addLog(`Device selected: ${deviceName}`);
         
         const server = await device.gatt.connect();
         statusText.textContent = "Status: Handshaking with Trainer...";
+        addLog('GATT server connected');
         
         await new Promise(resolve => setTimeout(resolve, 1500));
         
         const powerService = await server.getPrimaryService(CYCLING_POWER_SERVICE);
         const powerCharacteristic = await powerService.getCharacteristic(POWER_MEASUREMENT_CHAR);
+        addLog('Power measurement service acquired');
         
         // Try to get trainer control
         try {
@@ -103,13 +122,13 @@ connectButton.addEventListener('click', async () => {
             const trainerService = await server.getPrimaryService(WAHOO_TRAINER_SERVICE);
             trainerCharacteristic = await trainerService.getCharacteristic(WAHOO_TRAINER_CHAR);
             
-            controlStatus.textContent = "Control: Found trainer service";
+            addLog('Trainer control service found');
             
             statusText.textContent = "Status: Unlocking trainer...";
             const unlockCmd = new Uint8Array([0x20, 0xEE, 0xFC]);
             await trainerCharacteristic.writeValue(unlockCmd);
             
-            controlStatus.textContent = "Control: Unlocked successfully";
+            addLog('Unlock command sent successfully');
             
             await new Promise(resolve => setTimeout(resolve, 1000));
             
@@ -118,11 +137,12 @@ connectButton.addEventListener('click', async () => {
             statusText.textContent = "Status: Connected with control!";
         } catch (controlError) {
             statusText.textContent = "Status: Connected (read-only)";
-            controlStatus.textContent = `Control: Unavailable - ${controlError.message}`;
+            addLog(`Trainer control unavailable: ${controlError.name} - ${controlError.message}`);
             trainerCharacteristic = null;
         }
         
         await powerCharacteristic.startNotifications();
+        addLog('Power notifications started');
         
         powerCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
             const value = event.target.value;
@@ -132,60 +152,48 @@ connectButton.addEventListener('click', async () => {
             const watts = value.getUint16(2, true);
             currentPowerDisplay.textContent = `Current: ${watts}`;
             
-            // Log raw bytes
-            const bytes = [];
-            for (let i = 0; i < value.byteLength; i++) {
-                bytes.push(value.getUint8(i).toString(16).padStart(2, '0'));
-            }
-            dataInfo.textContent = `Data packets: ${packetCount}, Length: ${value.byteLength} bytes, Raw: ${bytes.join(' ')}`;
-            
-            // Try to parse cadence from different positions
-            let cadenceInfo = "Not found in packet";
-            let bestCadence = null;
-            
-            if (value.byteLength >= 6) {
-                const pos4 = value.getUint16(4, true);
-                const pos6 = value.byteLength >= 8 ? value.getUint16(6, true) : null;
-                
-                cadenceInfo = `Position 4: ${pos4}`;
-                if (pos6 !== null) {
-                    cadenceInfo += `, Position 6: ${pos6}`;
+            // Log first few packets and then every 20th packet
+            if (packetCount <= 5 || packetCount % 20 === 0) {
+                const bytes = [];
+                for (let i = 0; i < value.byteLength; i++) {
+                    bytes.push(value.getUint8(i).toString(16).padStart(2, '0'));
                 }
-                
-                // Pick most reasonable cadence value
-                if (pos6 !== null && pos6 > 30 && pos6 < 150) {
-                    bestCadence = pos6;
-                } else if (pos4 > 30 && pos4 < 150) {
-                    bestCadence = pos4;
-                } else if (pos4 / 2 > 30 && pos4 / 2 < 150) {
-                    bestCadence = Math.round(pos4 / 2);
-                    cadenceInfo += ` (using halved value)`;
-                }
+                addLog(`Packet ${packetCount}: ${value.byteLength} bytes, Flags: ${flags.toString(2).padStart(8, '0')}, Hex: ${bytes.join(' ')}`);
             }
             
-            cadenceDebug.textContent = `Cadence data: ${cadenceInfo}`;
+            // Try to calculate cadence from cumulative revolution count
+            // Standard cycling power measurement includes:
+            // - Cumulative Crank Revolutions (uint16 at some offset)
+            // - Last Crank Event Time (uint16 at next offset)
             
-            if (bestCadence) {
-                cadenceDisplay.textContent = `Cadence (RPM): ${bestCadence}`;
+            if (value.byteLength >= 8 && (flags & 0x04)) {
+                // Crank revolution data is present
+                const revCount = value.getUint16(4, true);
+                const eventTime = value.getUint16(6, true); // in 1/1024 seconds
+                
+                if (lastRevCount !== null && lastRevTime !== null) {
+                    const revDelta = (revCount - lastRevCount + 65536) % 65536; // Handle rollover
+                    const timeDelta = (eventTime - lastRevTime + 65536) % 65536;
+                    
+                    if (timeDelta > 0 && revDelta > 0 && revDelta < 10) { // Sanity check
+                        // Calculate RPM: (revolutions / time_in_seconds) * 60
+                        const timeInSeconds = timeDelta / 1024;
+                        const rpm = Math.round((revDelta / timeInSeconds) * 60);
+                        
+                        if (rpm > 20 && rpm < 200) { // Reasonable cadence range
+                            cadenceDisplay.textContent = `Cadence (RPM): ${rpm}`;
+                            
+                            if (packetCount <= 5 || packetCount % 20 === 0) {
+                                addLog(`Cadence calc: ${revDelta} revs in ${timeDelta} time units = ${rpm} RPM`);
+                            }
+                        }
+                    }
+                }
+                
+                lastRevCount = revCount;
+                lastRevTime = eventTime;
             }
         });
         
         device.addEventListener('gattserverdisconnected', () => {
-            statusText.textContent = "Status: Disconnected. Please scan again.";
-            currentPowerDisplay.textContent = "Current: --";
-            cadenceDisplay.textContent = "Cadence (RPM): --";
-            controlStatus.textContent = "Control: Not connected";
-            lastCommand.textContent = "Last command: None";
-            dataInfo.textContent = "Data packets: 0";
-            cadenceDebug.textContent = "Cadence data: Not available";
-            trainerCharacteristic = null;
-        });
-        
-    } catch (error) {
-        statusText.textContent = "Status: Error - " + (error.message || "Unknown error");
-        controlStatus.textContent = `Control: Connection failed - ${error.message}`;
-    }
-});
-    </script>
-</body>
-</html>
+            sta
