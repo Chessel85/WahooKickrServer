@@ -12,48 +12,70 @@
     <h2 id="powerDisplay">Watts: --</h2>
 
     <script>
-        const connectButton = document.getElementById('connectButton');
-        const statusText = document.getElementById('status');
-        const powerDisplay = document.getElementById('powerDisplay');
+const connectButton = document.getElementById('connectButton');
+const statusText = document.getElementById('status');
+const powerDisplay = document.getElementById('powerDisplay');
 
-        connectButton.addEventListener('click', async () => {
-            try {
-                // Clear any previous error text
-                statusText.textContent = "Status: Searching...";
-                
-                // Using the standard UUID for Cycling Power
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [0x1818] }]
-                });
+// These are the official UUIDs for Cycling Power
+const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
+const POWER_MEASUREMENT_CHAR = '00001817-0000-1000-8000-00805f9b34fb';
 
-                statusText.textContent = "Status: Connecting to " + device.name;
-                const server = await device.gatt.connect();
-                
-                statusText.textContent = "Status: Handshaking...";
-                await new Promise(resolve => setTimeout(resolve, 1000));
+connectButton.addEventListener('click', async () => {
+    try {
+        statusText.textContent = "Status: Searching...";
 
-                // ONLY ONE SERVICE DECLARATION HERE
-                const cyclingService = await server.getPrimaryService(0x1818);
-                
-                statusText.textContent = "Status: Finding Power Room...";
-                const characteristic = await cyclingService.getCharacteristic(0x1817);
+        // 1. Request the device
+        // We filter for KICKR but must declare the service as 'optional' 
+        // so the browser is allowed to access it after connection.
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: 'KICKR' }],
+            optionalServices: [CYCLING_POWER_SERVICE]
+        });
 
-                await characteristic.startNotifications();
-                statusText.textContent = "Status: Receiving Data!";
+        statusText.textContent = "Status: Connecting to " + device.name;
+        
+        // 2. Connect to the GATT Server
+        const server = await device.gatt.connect();
 
-                characteristic.addEventListener('characteristicvaluechanged', (event) => {
-                    const value = event.target.value;
-                    // Read 16-bit power value at offset 2
-                    const watts = value.getUint16(2, true); 
-                    powerDisplay.textContent = `Watts: ${watts}`;
-                });
+        statusText.textContent = "Status: Handshaking...";
+        // A small delay helps the Wahoo hardware stabilize the connection
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-            } catch (error) {
-                // This will tell us if it's a Permission error or a Code error
-                statusText.textContent = "Status: Error - " + error;
-                console.error(error);
+        // 3. Get the Cycling Power Service
+        const service = await server.getPrimaryService(CYCLING_POWER_SERVICE);
+
+        // 4. Get the Power Measurement Characteristic
+        const characteristic = await service.getCharacteristic(POWER_MEASUREMENT_CHAR);
+
+        // 5. Start notifications (listening for data)
+        await characteristic.startNotifications();
+        statusText.textContent = "Status: Receiving Data!";
+
+        // 6. Handle the incoming data
+        characteristic.addEventListener('characteristicvaluechanged', (event) => {
+            const value = event.target.value;
+            // According to Bluetooth SIG, power is a 16-bit UINT at offset 2
+            const watts = value.getUint16(2, true);
+            powerDisplay.textContent = `Watts: ${watts}`;
+            
+            // Subtle update so VoiceOver knows the page is "alive"
+            if (watts % 5 === 0) { 
+                statusText.textContent = "Status: Live Data"; 
             }
         });
+
+        // Handle accidental disconnection
+        device.addEventListener('gattserverdisconnected', () => {
+            statusText.textContent = "Status: Disconnected. Please reconnect.";
+            powerDisplay.textContent = "Watts: --";
+        });
+
+    } catch (error) {
+        // This will print the exact technical error name (e.g., NotAllowedError)
+        statusText.textContent = "Status: " + error.name + ": " + error.message;
+        console.error(error);
+    }
+});
     </script>
 </body>
 </html>
