@@ -1,8 +1,38 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>KICKR Control</title>
+</head>
 <body>
-  <h1>Wahoo KICKR Dashboard</h1>
-  <button id="connect">Connect to KICKR</button>
-  <p>Status: Ready to connect</p>
+    <h1>Wahoo KICKR Dashboard</h1>
+    <button id="connectButton">Scan for KICKR</button>
+    <p id="status">Status: Disconnected</p>
+    <ul id="deviceList"></ul>
+
+    <script>
+        const connectButton = document.getElementById('connectButton');
+        const statusText = document.getElementById('status');
+
+        connectButton.addEventListener('click', async () => {
+            try {
+                statusText.textContent = "Status: Searching...";
+                
+                // This looks for devices supporting the Fitness Machine Service
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: ['fitness_machine'] }]
+                });
+
+                statusText.textContent = `Status: Found ${device.name}`;
+                
+                const server = await device.gatt.connect();
+                statusText.textContent = `Status: Connected to ${device.name}`;
+
+            } catch (error) {
+                statusText.textContent = "Status: Error - " + error;
+                console.error(error);
+            }
+        });
+    </script>
 </body>
 </html>
