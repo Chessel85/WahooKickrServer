@@ -16,7 +16,7 @@ const connectButton = document.getElementById('connectButton');
 const statusText = document.getElementById('status');
 const powerDisplay = document.getElementById('powerDisplay');
 
-// These are the official UUIDs for Cycling Power
+// Official Bluetooth SIG UUIDs for Cycling Power
 const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
 const POWER_MEASUREMENT_CHAR = '00001817-0000-1000-8000-00805f9b34fb';
 
@@ -24,57 +24,50 @@ connectButton.addEventListener('click', async () => {
     try {
         statusText.textContent = "Status: Searching...";
 
-        // 1. Request the device
-        // We filter for KICKR but must declare the service as 'optional' 
-        // so the browser is allowed to access it after connection.
+        // Broadest possible search to avoid empty lists
         const device = await navigator.bluetooth.requestDevice({
-            // This tells the phone: "Show me everything you see"
             acceptAllDevices: true,
             optionalServices: [CYCLING_POWER_SERVICE]
         });
 
-        statusText.textContent = "Status: Connecting to " + device.name;
+        // We avoid device.name here to prevent "undefined" errors
+        statusText.textContent = "Status: KICKR Selected. Connecting...";
         
-        // 2. Connect to the GATT Server
         const server = await device.gatt.connect();
 
-        statusText.textContent = "Status: Handshaking...";
-        // A small delay helps the Wahoo hardware stabilize the connection
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        statusText.textContent = "Status: Handshaking with Trainer...";
+        // 1.5 second pause allows the KICKR to stabilize the GATT server
+        await new Promise(resolve => setTimeout(resolve, 1500));
 
-        // 3. Get the Cycling Power Service
         const service = await server.getPrimaryService(CYCLING_POWER_SERVICE);
-
-        // 4. Get the Power Measurement Characteristic
         const characteristic = await service.getCharacteristic(POWER_MEASUREMENT_CHAR);
 
-        // 5. Start notifications (listening for data)
+        // Start listening for the power data packets
         await characteristic.startNotifications();
         statusText.textContent = "Status: Receiving Data!";
 
-        // 6. Handle the incoming data
         characteristic.addEventListener('characteristicvaluechanged', (event) => {
             const value = event.target.value;
-            // According to Bluetooth SIG, power is a 16-bit UINT at offset 2
+            // The Power value (Watts) is a 16-bit integer starting at the 3rd byte (index 2)
             const watts = value.getUint16(2, true);
             powerDisplay.textContent = `Watts: ${watts}`;
             
-            // Subtle update so VoiceOver knows the page is "alive"
-            if (watts % 5 === 0) { 
-                statusText.textContent = "Status: Live Data"; 
+            // Periodically update status so VoiceOver confirms the connection is alive
+            if (statusText.textContent !== "Status: Data Live") {
+                statusText.textContent = "Status: Data Live";
             }
         });
 
-        // Handle accidental disconnection
+        // Auto-cleanup if the connection drops
         device.addEventListener('gattserverdisconnected', () => {
-            statusText.textContent = "Status: Disconnected. Please reconnect.";
+            statusText.textContent = "Status: Disconnected. Please scan again.";
             powerDisplay.textContent = "Watts: --";
         });
 
     } catch (error) {
-        // This will print the exact technical error name (e.g., NotAllowedError)
-        statusText.textContent = "Status: " + error.name + ": " + error.message;
-        console.error(error);
+        // Detailed error reporting for troubleshooting
+        statusText.textContent = "Status: Error - " + error.message;
+        console.error("Bluetooth Error:", error);
     }
 });
     </script>
