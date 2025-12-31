@@ -3,141 +3,132 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Diagnostic Tool</title>
+    <title>KICKR Gen 1 (EE01)</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 15px; background: #121212; color: #e0e0e0; }
-        .box { background: #1e1e1e; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #333; }
-        button { background: #007aff; color: white; border: none; padding: 12px; border-radius: 6px; width: 100%; font-weight: bold; margin-top: 5px; }
-        #log { font-family: monospace; font-size: 11px; background: #000; padding: 10px; border-radius: 5px; height: 300px; overflow-y: auto; white-space: pre-wrap; color: #00ff00; }
-        .stat { font-size: 20px; color: #00ff00; font-weight: bold; }
+        body { font-family: -apple-system, sans-serif; padding: 20px; background: #121212; color: white; text-align: center; }
+        .data-card { background: #1e1e1e; padding: 20px; border-radius: 15px; margin-bottom: 15px; border: 1px solid #333; }
+        .val { font-size: 54px; font-weight: bold; color: #00ff00; line-height: 1; }
+        .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+        button { background: #007aff; color: white; border: none; padding: 15px; border-radius: 10px; font-size: 18px; font-weight: bold; width: 45%; margin: 5px; }
+        #connectBtn { width: 100%; background: #34c759; margin-bottom: 20px; }
+        #log { font-family: monospace; font-size: 10px; color: #00ff00; text-align: left; background: black; padding: 10px; border-radius: 5px; height: 100px; overflow-y: auto; }
     </style>
 </head>
 <body>
 
-    <div class="box">
-        <h3>1. Discovery</h3>
-        <button id="btnConnect">SCAN & DIAGNOSE</button>
-        <p id="status" style="font-size: 12px; color: #888;">Ready.</p>
-    </div>
+    <button id="connectBtn">CONNECT Blue KICKR</button>
 
-    <div class="box">
-        <div style="display:flex; justify-content: space-around; text-align: center;">
-            <div>POWER<br><span id="valPower" class="stat">--</span></div>
-            <div>CADENCE<br><span id="valCad" class="stat">--</span></div>
-            <div>TARGET<br><span id="valTarget" class="stat">100</span></div>
-        </div>
-        <div style="display:flex; gap: 5px; margin-top:10px;">
-            <button id="btnDown">-10</button>
-            <button id="btnUp">+10</button>
+    <div class="data-card">
+        <div class="label">Target Power</div>
+        <div id="targetDisplay" class="val">100</div>
+        <div style="margin-top:15px;">
+            <button id="downBtn">- 10W</button>
+            <button id="upBtn">+ 10W</button>
         </div>
     </div>
 
-    <div class="box">
-        <h3>System Log</h3>
-        <div id="log">Waiting for connection...</div>
+    <div style="display: flex; gap: 10px;">
+        <div class="data-card" style="flex: 1;">
+            <div class="label">Current Watts</div>
+            <div id="pwrDisplay" class="val" style="font-size: 32px;">--</div>
+        </div>
+        <div class="data-card" style="flex: 1;">
+            <div class="label">Cadence</div>
+            <div id="cadDisplay" class="val" style="font-size: 32px;">--</div>
+        </div>
     </div>
+
+    <div id="log">Logs will appear here...</div>
 
 <script>
-    const logEl = document.getElementById('log');
-    const statusEl = document.getElementById('status');
-    let trainerChar = null;
-    let targetPower = 100;
+    // These are the UUIDs discovered from your specific log
+    const SERVICE_POWER = '00001818-0000-1000-8000-00805f9b34fb';
+    const CHAR_POWER = '00002a63-0000-1000-8000-00805f9b34fb';
+    
+    // Updated to match your log: EE01 instead of EE0D
+    const SERVICE_WAHOO = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b'; 
+    const CHAR_WAHOO = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
 
-    function addLog(msg) {
-        const time = new Date().toLocaleTimeString().split(' ')[0];
-        logEl.innerText += `\n[${time}] ${msg}`;
-        logEl.scrollTop = logEl.scrollHeight;
-        console.log(msg);
+    let trainerChar = null;
+    let targetWatts = 100;
+    let lastRevCount = null, lastRevTime = null;
+
+    function addLog(m) {
+        const l = document.getElementById('log');
+        l.innerText += `\n> ${m}`;
+        l.scrollTop = l.scrollHeight;
     }
 
-    // Generic function to set power
-    async function updatePower(p) {
+    async function sendPower(w) {
         if (!trainerChar) return;
         try {
-            const data = new Uint8Array([0x42, p & 0xFF, (p >> 8) & 0xFF]);
+            // Standard Wahoo Erg Command
+            const data = new Uint8Array([0x42, w & 0xFF, (w >> 8) & 0xFF]);
             await trainerChar.writeValue(data);
-            addLog(`SENT POWER: ${p}W`);
         } catch (e) {
-            addLog(`WRITE ERROR: ${e.name} - ${e.message}`);
+            addLog("Write Error: " + e.message);
         }
     }
 
-    document.getElementById('btnUp').onclick = () => { targetPower += 10; document.getElementById('valTarget').innerText = targetPower; updatePower(targetPower); };
-    document.getElementById('btnDown').onclick = () => { targetPower -= 10; document.getElementById('valTarget').innerText = targetPower; updatePower(targetPower); };
+    document.getElementById('upBtn').onclick = () => { targetWatts += 10; document.getElementById('targetDisplay').innerText = targetWatts; sendPower(targetWatts); };
+    document.getElementById('downBtn').onclick = () => { targetWatts = Math.max(50, targetWatts - 10); document.getElementById('targetDisplay').innerText = targetWatts; sendPower(targetWatts); };
 
-    document.getElementById('btnConnect').onclick = async () => {
+    document.getElementById('connectBtn').onclick = async () => {
         try {
-            logEl.innerText = "Starting Discovery...";
-            
-            // We filter for the KICKR name prefix to be less restrictive
+            addLog("Searching...");
             const device = await navigator.bluetooth.requestDevice({
-                filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
-                optionalServices: [
-                    '00001818-0000-1000-8000-00805f9b34fb', // Cycling Power
-                    'a026ee0d-0a7d-4ab3-97fa-f1500f9feb8b', // Wahoo Trainer
-                    '0000181c-0000-1000-8000-00805f9b34fb'  // FTMS (Standard Control)
-                ]
+                filters: [{ namePrefix: 'KICKR' }],
+                optionalServices: [SERVICE_POWER, SERVICE_WAHOO]
             });
 
-            statusEl.innerText = "Connecting to GATT...";
             const server = await device.gatt.connect();
-            addLog("Connected to GATT Server.");
+            addLog("Connected.");
 
-            // DIAGNOSTIC: List all available services
-            addLog("Fetching Primary Services...");
-            const services = await server.getPrimaryServices();
-            addLog(`Found ${services.length} services.`);
+            // Get Power Service
+            const pSvc = await server.getPrimaryService(SERVICE_POWER);
+            const pChar = await pSvc.getCharacteristic(CHAR_POWER);
+            await pChar.startNotifications();
+            pChar.oncharacteristicvaluechanged = handleData;
+            addLog("Power tracking active.");
 
-            for (const service of services) {
-                addLog(`SERVICE: ${service.uuid}`);
-                
-                // Inspect Cycling Power Service
-                if (service.uuid.includes('1818')) {
-                    const char = await service.getCharacteristic('00002a63-0000-1000-8000-00805f9b34fb');
-                    await char.startNotifications();
-                    char.oncharacteristicvaluechanged = handleData;
-                    addLog("  -> Power Notifications Active");
-                }
-
-                // Look for Wahoo Control Characteristic
-                if (service.uuid.includes('a026ee0d')) {
-                    trainerChar = await service.getCharacteristic('a026e005-0a7d-4ab3-97fa-f1500f9feb8b');
-                    addLog("  -> Wahoo Control Char Found!");
-                    
-                    // Unlock attempt
-                    addLog("  -> Sending Unlock (0x20EEFC)...");
-                    await trainerChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
-                    addLog("  -> Unlock Sent.");
-                }
-                
-                // Check if it supports modern FTMS (standard control)
-                if (service.uuid.includes('181c')) {
-                    addLog("  -> FTMS Service Found (Unit supports modern standard)");
-                }
-            }
-
-            statusEl.innerText = "Connected: Check Logs";
-            if (trainerChar) await updatePower(targetPower);
+            // Get Wahoo Service (using your discovered EE01 UUID)
+            const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
+            trainerChar = await wSvc.getCharacteristic(CHAR_WAHOO);
+            
+            addLog("Control found. Unlocking...");
+            await trainerChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+            
+            await sendPower(targetWatts);
+            addLog("KICKR Ready!");
+            document.getElementById('connectBtn').innerText = "KICKR CONNECTED";
+            document.getElementById('connectBtn').style.background = "#1a1a1a";
 
         } catch (err) {
-            addLog(`FATAL ERROR: ${err.name} - ${err.message}`);
-            statusEl.innerText = "Connection Failed.";
+            addLog("Error: " + err.message);
         }
     };
 
     function handleData(event) {
         const v = event.target.value;
+        // Watts is usually at index 2
         const watts = v.getUint16(2, true);
-        document.getElementById('valPower').innerText = watts;
+        document.getElementById('pwrDisplay').innerText = watts;
 
-        // Cadence (Bit 2 of Flags check)
+        // Cadence Logic
         const flags = v.getUint8(0);
         if (v.byteLength >= 8 && (flags & 0x04)) {
-            // Basic cadence update logic
             const revs = v.getUint16(4, true);
             const time = v.getUint16(6, true);
-            // Simple RPM display logic (simplified for diagnostics)
-            document.getElementById('valCad').innerText = "OK"; 
+            if (lastRevCount !== null) {
+                const dR = (revs - lastRevCount + 65536) % 65536;
+                const dT = (time - lastRevTime + 65536) % 65536;
+                if (dT > 0 && dR > 0) {
+                    const rpm = Math.round((dR / (dT / 1024)) * 60);
+                    if (rpm > 20 && rpm < 200) document.getElementById('cadDisplay').innerText = rpm;
+                }
+            }
+            lastRevCount = revs;
+            lastRevTime = time;
         }
     }
 </script>
