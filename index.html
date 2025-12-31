@@ -3,41 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Crimson Jaguar</title>
+    <title>KICKR Desert Cobra</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; background: #1a0f0f; color: #f5f5f5; text-align: center; }
-        .version { font-size: 12px; color: #e74c3c; margin-bottom: 10px; font-weight: bold; }
-        .card { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #e74c3c; }
-        .val { font-size: 48px; font-weight: bold; color: #ffeb3b; }
-        button { background: #e74c3c; color: white; border: none; padding: 15px; border-radius: 8px; font-size: 16px; font-weight: bold; width: 45%; margin: 5px; }
-        #connectBtn { width: 100%; background: #fff; color: #1a0f0f; margin-bottom: 20px; }
-        #log { font-family: monospace; font-size: 10px; color: #00ff00; text-align: left; background: #000; padding: 10px; border-radius: 5px; height: 200px; overflow-y: auto; white-space: pre-wrap; }
+        body { font-family: -apple-system, sans-serif; padding: 15px; background: #2d2d00; color: #fff; text-align: center; }
+        .version { font-size: 12px; color: #f1c40f; margin-bottom: 10px; font-weight: bold; }
+        .card { background: rgba(0,0,0,0.4); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #f1c40f; }
+        .val { font-size: 42px; font-weight: bold; color: #f1c40f; }
+        button { background: #f1c40f; color: #000; border: none; padding: 12px; border-radius: 8px; font-size: 14px; font-weight: bold; margin: 5px; }
+        .cmd-btn { width: 90%; background: #e67e22; color: white; margin-bottom: 10px; }
+        #connectBtn { width: 100%; background: #fff; color: #000; height: 50px; font-size: 18px; margin-bottom: 15px; }
+        #log { font-family: monospace; font-size: 10px; color: #2ecc71; text-align: left; background: #000; padding: 10px; border-radius: 5px; height: 180px; overflow-y: auto; white-space: pre-wrap; }
     </style>
 </head>
 <body>
 
-    <div class="version">VERSION: CRIMSON JAGUAR</div>
-    <button id="connectBtn">CONNECT KICKR</button>
+    <div class="version">VERSION: DESERT COBRA</div>
+    <button id="connectBtn">SCAN & CONNECT</button>
 
     <div class="card">
         <div class="val" id="pwrDisplay">--W</div>
-        <div style="font-size: 12px; color: #888;">ACTUAL POWER</div>
+        <div style="font-size: 12px; color: #aaa;">LIVE POWER</div>
     </div>
 
     <div class="card">
-        <div id="targetDisplay" style="font-size: 24px; font-weight: bold;">Target: 100W</div>
-        <button id="downBtn">-10</button>
-        <button id="upBtn">+10</button>
+        <div style="font-size: 14px; margin-bottom: 10px;">TEST CONTROL HEADERS (Target 150W)</div>
+        <button class="cmd-btn" id="btn42">TRY HEADER 0x42 (Wahoo)</button>
+        <button class="cmd-btn" id="btn05">TRY HEADER 0x05 (FTMS)</button>
+        <button class="cmd-btn" id="btn01">TRY HEADER 0x01 (Legacy)</button>
     </div>
 
-    <div id="log">System initialized...</div>
+    <div id="log">Waiting for connection...</div>
 
 <script>
     const SERVICE_POWER = '00001818-0000-1000-8000-00805f9b34fb';
+    const CHAR_POWER = '00002a63-0000-1000-8000-00805f9b34fb';
     const SERVICE_WAHOO = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
+    const CHAR_CONTROL = 'a026e002-0a7d-4ab3-97fa-f1500f9feb8b';
 
     let controlChar = null;
-    let targetWatts = 100;
 
     function addLog(m) {
         const l = document.getElementById('log');
@@ -45,25 +48,25 @@
         l.scrollTop = l.scrollHeight;
     }
 
-    async function sendPower(w) {
-        if (!controlChar) return;
+    async function testCommand(header) {
+        if (!controlChar) { addLog("Connect first!"); return; }
         try {
-            // Trying a different Command Header (0x05) which is sometimes 
-            // used for Target Power on early v1 firmwares
-            const data = new Uint8Array([0x05, w & 0xFF, (w >> 8) & 0xFF]);
+            const watts = 150;
+            const data = new Uint8Array([header, watts & 0xFF, (watts >> 8) & 0xFF]);
             await controlChar.writeValue(data);
-            addLog(`Cmd(0x05) Sent: ${w}W`);
+            addLog(`SENT: [0x${header.toString(16).padStart(2,'0')}, 96, 00] (150W)`);
         } catch (e) {
-            addLog("Write Error: " + e.message);
+            addLog("Error: " + e.message);
         }
     }
 
-    document.getElementById('upBtn').onclick = () => { targetWatts += 10; document.getElementById('targetDisplay').innerText = `Target: ${targetWatts}W`; sendPower(targetWatts); };
-    document.getElementById('downBtn').onclick = () => { targetWatts -= 10; document.getElementById('targetDisplay').innerText = `Target: ${targetWatts}W`; sendPower(targetWatts); };
+    document.getElementById('btn42').onclick = () => testCommand(0x42);
+    document.getElementById('btn05').onclick = () => testCommand(0x05);
+    document.getElementById('btn01').onclick = () => testCommand(0x01);
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
-            addLog("Scanning (Restored Filters)...");
+            addLog("Searching...");
             const device = await navigator.bluetooth.requestDevice({
                 filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
                 optionalServices: [SERVICE_POWER, SERVICE_WAHOO]
@@ -72,36 +75,34 @@
             const server = await device.gatt.connect();
             addLog("GATT Connected.");
 
-            // 1. Re-establishing Power Subscriptions from Silver Fox
-            const pSvc = await server.getPrimaryService(SERVICE_POWER);
-            const pChars = await pSvc.getCharacteristics();
-            for (let c of pChars) {
-                if (c.properties.notify) {
-                    await c.startNotifications();
-                    c.oncharacteristicvaluechanged = (e) => {
-                        const v = e.target.value;
-                        if (v.byteLength >= 4) {
-                            // Extracting Watts from standard Cycling Power profile
-                            document.getElementById('pwrDisplay').innerText = v.getUint16(2, true) + "W";
-                        }
-                    };
-                    addLog(`Power active: ${c.uuid.substring(4,8)}`);
-                }
-            }
+            // THE 1.5s DELAY (From Old Script)
+            addLog("Pausing for handshake...");
+            await new Promise(r => setTimeout(r, 1500));
 
-            // 2. Control Setup using confirmed ID E002 from Blue Whale
+            // 1. POWER SETUP (Using addEventListener from Old Script)
+            const pSvc = await server.getPrimaryService(SERVICE_POWER);
+            const pChar = await pSvc.getCharacteristic(CHAR_POWER);
+            await pChar.startNotifications();
+            pChar.addEventListener('characteristicvaluechanged', (e) => {
+                const v = e.target.value;
+                const w = v.getUint16(2, true);
+                document.getElementById('pwrDisplay').innerText = w + "W";
+            });
+            addLog("Power Stream Live.");
+
+            // 2. CONTROL SETUP
             const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
-            controlChar = await wSvc.getCharacteristic('a026e002-0a7d-4ab3-97fa-f1500f9feb8b');
+            controlChar = await wSvc.getCharacteristic(CHAR_CONTROL);
             
-            addLog("Unlocking E002...");
+            // Standard Unlock Key
+            addLog("Unlocking...");
             await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
             
-            // Send initial power
-            await sendPower(targetWatts);
-            addLog("READY.");
+            addLog("READY. Test the buttons above.");
+            document.getElementById('connectBtn').innerText = "KICKR CONNECTED";
 
         } catch (err) {
-            addLog(`Fatal: ${err.message}`);
+            addLog("Fatal: " + err.message);
         }
     };
 </script>
