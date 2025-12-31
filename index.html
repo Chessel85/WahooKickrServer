@@ -3,159 +3,117 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Blue Whale</title>
+    <title>KICKR Blue Whale v2</title>
     <style>
         body { font-family: -apple-system, sans-serif; padding: 20px; background: #001f3f; color: white; text-align: center; }
         .version { font-size: 10px; color: #39cccc; margin-bottom: 10px; text-transform: uppercase; }
-        .data-card { background: rgba(255,255,255,0.1); padding: 20px; border-radius: 15px; margin-bottom: 15px; border: 1px solid #39cccc; }
-        .val { font-size: 54px; font-weight: bold; color: #01ff70; line-height: 1; }
-        .label { font-size: 12px; color: #39cccc; text-transform: uppercase; margin-bottom: 5px; }
+        .data-card { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #39cccc; }
+        .val { font-size: 48px; font-weight: bold; color: #01ff70; line-height: 1; }
         button { background: #007aff; color: white; border: none; padding: 15px; border-radius: 10px; font-size: 18px; font-weight: bold; width: 45%; margin: 5px; }
         #connectBtn { width: 100%; background: #39cccc; color: #001f3f; margin-bottom: 20px; }
-        #log { font-family: monospace; font-size: 10px; color: #01ff70; text-align: left; background: black; padding: 10px; border-radius: 5px; height: 120px; overflow-y: auto; white-space: pre-wrap; }
+        #log { font-family: monospace; font-size: 10px; color: #01ff70; text-align: left; background: black; padding: 10px; border-radius: 5px; height: 180px; overflow-y: auto; white-space: pre-wrap; }
     </style>
 </head>
 <body>
 
-    <div class="version">Version: Blue Whale</div>
+    <div class="version">Version: Blue Whale v2</div>
     <button id="connectBtn">CONNECT KICKR</button>
 
     <div class="data-card">
-        <div class="label">Target Power</div>
         <div id="targetDisplay" class="val">100</div>
-        <div style="margin-top:15px;">
-            <button id="downBtn">- 10W</button>
-            <button id="upBtn">+ 10W</button>
-        </div>
+        <button id="downBtn">- 10W</button>
+        <button id="upBtn">+ 10W</button>
     </div>
 
-    <div style="display: flex; gap: 10px;">
-        <div class="data-card" style="flex: 1;">
-            <div class="label">Current Watts</div>
-            <div id="pwrDisplay" class="val" style="font-size: 32px;">--</div>
-        </div>
-        <div class="data-card" style="flex: 1;">
-            <div class="label">Cadence</div>
-            <div id="cadDisplay" class="val" style="font-size: 32px;">--</div>
-        </div>
+    <div class="data-card">
+        <div>WATTS: <span id="pwrDisplay" style="color:#01ff70">--</span></div>
+        <div>CADENCE: <span id="cadDisplay" style="color:#01ff70">--</span></div>
     </div>
 
-    <div id="log">System Ready.</div>
+    <div id="log">Ready to hunt...</div>
 
 <script>
-    // UUIDs verified from your previous successful diagnostic log
     const SERVICE_POWER = '00001818-0000-1000-8000-00805f9b34fb';
-    const CHAR_POWER = '00002a63-0000-1000-8000-00805f9b34fb';
     const SERVICE_WAHOO_EE01 = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
-    const CHAR_WAHOO_CONTROL = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
 
     let trainerChar = null;
     let targetWatts = 100;
-    let lastRevCount = null, lastRevTime = null;
 
     function addLog(m) {
         const l = document.getElementById('log');
-        l.innerText += `\n[${new Date().toLocaleTimeString().split(' ')[0]}] ${m}`;
+        l.innerText += `\n> ${m}`;
         l.scrollTop = l.scrollHeight;
     }
 
     async function sendPower(w) {
-        if (!trainerChar) return;
+        if (!trainerChar) { addLog("No control handle!"); return; }
         try {
-            // Wahoo Erg Mode Command (0x42 + watts in Little Endian)
             const data = new Uint8Array([0x42, w & 0xFF, (w >> 8) & 0xFF]);
             await trainerChar.writeValue(data);
-            addLog(`Target set to ${w}W`);
+            addLog(`Sent: ${w}W`);
         } catch (e) {
-            addLog("Command Error: " + e.message);
+            addLog("Cmd Fail: " + e.message);
         }
     }
 
-    document.getElementById('upBtn').onclick = () => { 
-        targetWatts += 10; 
-        document.getElementById('targetDisplay').innerText = targetWatts; 
-        sendPower(targetWatts); 
-    };
-    
-    document.getElementById('downBtn').onclick = () => { 
-        targetWatts = Math.max(50, targetWatts - 10); 
-        document.getElementById('targetDisplay').innerText = targetWatts; 
-        sendPower(targetWatts); 
-    };
+    document.getElementById('upBtn').onclick = () => { targetWatts += 10; document.getElementById('targetDisplay').innerText = targetWatts; sendPower(targetWatts); };
+    document.getElementById('downBtn').onclick = () => { targetWatts -= 10; document.getElementById('targetDisplay').innerText = targetWatts; sendPower(targetWatts); };
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
-            addLog("Starting Scan (Blue Whale logic)...");
-            
-            // Reverting exactly to the filter logic that worked in diagnostics
+            addLog("Scanning...");
             const device = await navigator.bluetooth.requestDevice({
                 filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
-                optionalServices: [
-                    SERVICE_POWER, 
-                    SERVICE_WAHOO_EE01,
-                    '0000180a-0000-1000-8000-00805f9b34fb', // Device Info
-                    '0000180f-0000-1000-8000-00805f9b34fb'  // Battery
-                ]
+                optionalServices: [SERVICE_POWER, SERVICE_WAHOO_EE01]
             });
 
-            addLog(`Selected: ${device.name}`);
             const server = await device.gatt.connect();
-            addLog("GATT Connected.");
+            addLog("Connected to " + device.name);
 
-            // 1. Establish Power Monitoring (Service 1818)
+            // 1. POWER SERVICE
             const pSvc = await server.getPrimaryService(SERVICE_POWER);
-            const pChar = await pSvc.getCharacteristic(CHAR_POWER);
-            await pChar.startNotifications();
-            pChar.oncharacteristicvaluechanged = handleData;
-            addLog("Power notifications active.");
-
-            // 2. Establish Trainer Control (Service EE01)
-            const wSvc = await server.getPrimaryService(SERVICE_WAHOO_EE01);
-            trainerChar = await wSvc.getCharacteristic(CHAR_WAHOO_CONTROL);
-            addLog("Control characteristic acquired.");
-            
-            // 3. Mandatory Unlock Sequence
-            addLog("Unlocking trainer...");
-            await trainerChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
-            
-            // 4. Initial Power Set
-            await sendPower(targetWatts);
-            
-            addLog("CONNECTION COMPLETE.");
-            document.getElementById('connectBtn').innerText = "KICKR CONNECTED";
-            document.getElementById('connectBtn').style.background = "#01ff70";
-            document.getElementById('connectBtn').style.color = "black";
-
-        } catch (err) {
-            addLog(`Error: ${err.name} - ${err.message}`);
-        }
-    };
-
-    function handleData(event) {
-        const v = event.target.value;
-        const watts = v.getUint16(2, true);
-        document.getElementById('pwrDisplay').innerText = watts;
-
-        const flags = v.getUint8(0);
-        // Bit 2 (0x04) indicates Crank Rev Data presence
-        if (v.byteLength >= 8 && (flags & 0x04)) {
-            const revs = v.getUint16(4, true);
-            const time = v.getUint16(6, true);
-            if (lastRevCount !== null) {
-                const dR = (revs - lastRevCount + 65536) % 65536;
-                const dT = (time - lastRevTime + 65536) % 65536;
-                if (dT > 0 && dR > 0) {
-                    // Time is in 1/1024 seconds
-                    const rpm = Math.round((dR / (dT / 1024)) * 60);
-                    if (rpm > 20 && rpm < 200) {
-                        document.getElementById('cadDisplay').innerText = rpm;
-                    }
+            const chars = await pSvc.getCharacteristics();
+            for (let c of chars) {
+                if (c.uuid.includes('2a63')) {
+                    await c.startNotifications();
+                    c.oncharacteristicvaluechanged = (e) => {
+                        const v = e.target.value;
+                        document.getElementById('pwrDisplay').innerText = v.getUint16(2, true);
+                    };
+                    addLog("Power active.");
                 }
             }
-            lastRevCount = revs;
-            lastRevTime = time;
+
+            // 2. CONTROL SERVICE (EE01)
+            addLog("Exploring EE01...");
+            const wSvc = await server.getPrimaryService(SERVICE_WAHOO_EE01);
+            const wChars = await wSvc.getCharacteristics();
+            
+            addLog(`Found ${wChars.length} chars in EE01`);
+            
+            for (let c of wChars) {
+                addLog(`Char: ${c.uuid}`);
+                // On very old KICKRs, the control char might have a different UUID
+                // If it supports "Write", we'll try to use it as our trainerChar
+                if (c.properties.write || c.properties.writeWithoutResponse) {
+                    trainerChar = c;
+                    addLog("Targeting writeable char: " + c.uuid.substring(0,8));
+                }
+            }
+
+            if (trainerChar) {
+                addLog("Unlocking...");
+                await trainerChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+                await sendPower(targetWatts);
+                addLog("SYSTEM READY");
+            } else {
+                addLog("ERROR: No writeable char found!");
+            }
+
+        } catch (err) {
+            addLog("Fatal: " + err.name + " " + err.message);
         }
-    }
+    };
 </script>
 </body>
 </html>
