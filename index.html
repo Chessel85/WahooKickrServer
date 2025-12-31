@@ -2,26 +2,26 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Black Mamba</title>
+    <title>KICKR Sidewinder</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; background: #000; color: #fff; text-align: center; }
-        .version { font-size: 12px; color: #ffcc00; margin-bottom: 10px; font-weight: bold; }
-        .card { background: #111; padding: 20px; border-radius: 15px; border: 1px solid #ffcc00; margin-bottom: 20px; }
-        button { background: #ffcc00; color: #000; border: none; padding: 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; margin: 10px 0; }
+        body { font-family: sans-serif; padding: 20px; background: #00051a; color: #fff; text-align: center; }
+        .version { font-size: 12px; color: #3498db; font-weight: bold; }
+        .card { background: rgba(52, 152, 219, 0.1); padding: 20px; border-radius: 15px; border: 1px solid #3498db; margin-bottom: 10px; }
+        button { background: #3498db; color: #fff; border: none; padding: 20px; border-radius: 12px; font-size: 16px; font-weight: bold; width: 100%; margin: 8px 0; }
         #log { font-family: monospace; font-size: 10px; color: #00ff00; text-align: left; background: #000; padding: 10px; height: 200px; overflow-y: auto; border: 1px solid #333; }
+        #status { font-size: 24px; font-weight: bold; color: #f1c40f; margin: 10px; }
     </style>
 </head>
 <body>
-
-    <div class="version">VERSION: BLACK MAMBA</div>
-    <button id="connectBtn" style="background:#fff;">1. CONNECT KICKR</button>
-
+    <div class="version">VERSION: SIDEWINDER</div>
+    <button id="connectBtn" style="background:#fff; color:#000;">1. CONNECT & AUTHORIZE</button>
+    
     <div class="card">
-        <p>START SPINNING THE WHEEL</p>
-        <button id="btnAction">2. ENGAGE RESISTANCE (LVL 5)</button>
+        <button id="btnStart" style="background: #2ecc71;">TOGGLE START COMMAND (0x07)</button>
+        <button id="btnSweep" style="background: #e67e22;">START RESISTANCE SWEEP (0-200)</button>
     </div>
 
+    <div id="status">Lvl: --</div>
     <div id="log">Ready...</div>
 
 <script>
@@ -42,33 +42,38 @@
                 optionalServices: [SERVICE_WAHOO]
             });
             const server = await device.gatt.connect();
-            addLog("Connected.");
-            
-            const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
-            controlChar = await wSvc.getCharacteristic(CHAR_CONTROL);
+            controlChar = await (await server.getPrimaryService(SERVICE_WAHOO)).getCharacteristic(CHAR_CONTROL);
             await controlChar.startNotifications();
-            
-            controlChar.addEventListener('characteristicvaluechanged', (e) => {
+            controlChar.oncharacteristicvaluechanged = (e) => {
                 const hex = Array.from(new Uint8Array(e.target.value.buffer)).map(b => b.toString(16).padStart(2,'0')).join(' ');
-                addLog(`KICKR: ${hex}`);
-            });
-
-            // THE HYBRID HANDSHAKE
-            addLog("Step 1: Unlocking...");
-            await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+                addLog(`REPLY: ${hex}`);
+            };
+            await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC])); 
             await new Promise(r => setTimeout(r, 400));
-            
-            addLog("Step 2: Authorizing (0x03)...");
-            await controlChar.writeValue(new Uint8Array([0x03]));
-            addLog("Ready to engage.");
+            await controlChar.writeValue(new Uint8Array([0x03])); 
+            addLog("AUTHORIZED.");
         } catch (err) { addLog("Error: " + err.message); }
     };
 
-    document.getElementById('btnAction').onclick = async () => {
+    document.getElementById('btnStart').onclick = async () => {
         if (!controlChar) return;
-        addLog("Attempting Resistance Level 5...");
-        // Sending FTMS command 0x04 (Resistance) with value 50 (0x32)
-        await controlChar.writeValue(new Uint8Array([0x04, 0x32]));
+        addLog("Sending FTMS START (0x07)...");
+        await controlChar.writeValue(new Uint8Array([0x07]));
+    };
+
+    document.getElementById('btnSweep').onclick = async () => {
+        if (!controlChar) return;
+        addLog("Starting Sweep...");
+        for (let i = 0; i <= 200; i += 10) {
+            document.getElementById('status').innerText = `Lvl: ${i}`;
+            // Sending as Op 0x04 + 2-byte Little Endian value
+            // This covers scaling from 0.0 to 20.0 or raw 0-200
+            try {
+                await controlChar.writeValue(new Uint8Array([0x04, i & 0xFF, (i >> 8) & 0xFF]));
+            } catch(e) {}
+            await new Promise(r => setTimeout(r, 1000));
+        }
+        addLog("Sweep Finished.");
     };
 </script>
 </body>
