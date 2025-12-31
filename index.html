@@ -3,32 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR King Cobra v2</title>
+    <title>KICKR Black Mamba</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; background: #1a0000; color: #fff; text-align: center; }
-        .version { font-size: 12px; color: #ff3e3e; margin-bottom: 10px; font-weight: bold; }
-        .card { background: rgba(255, 62, 62, 0.1); padding: 20px; border-radius: 15px; margin-bottom: 15px; border: 1px solid #ff3e3e; }
-        button { background: #ff3e3e; color: #fff; border: none; padding: 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; margin: 10px 0; }
-        #log { font-family: monospace; font-size: 11px; color: #00ff00; text-align: left; background: #000; padding: 10px; height: 250px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #333; }
+        body { font-family: -apple-system, sans-serif; padding: 20px; background: #000; color: #fff; text-align: center; }
+        .version { font-size: 12px; color: #ffcc00; margin-bottom: 10px; font-weight: bold; }
+        .card { background: #111; padding: 20px; border-radius: 15px; border: 1px solid #ffcc00; margin-bottom: 20px; }
+        button { background: #ffcc00; color: #000; border: none; padding: 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; margin: 10px 0; }
+        #log { font-family: monospace; font-size: 10px; color: #00ff00; text-align: left; background: #000; padding: 10px; height: 200px; overflow-y: auto; border: 1px solid #333; }
     </style>
 </head>
 <body>
 
-    <div class="version">VERSION: KING COBRA (LEVEL 5)</div>
-    <button id="connectBtn" style="background:#fff; color:#000;">1. CONNECT KICKR</button>
+    <div class="version">VERSION: BLACK MAMBA</div>
+    <button id="connectBtn" style="background:#fff;">1. CONNECT KICKR</button>
 
     <div class="card">
-        <p style="font-size: 14px;">START SPINNING</p>
-        <button id="btnFtmsLevel">2. SET RESISTANCE LEVEL 5</button>
-        <button id="btnFtmsPower">3. SET TARGET 200W</button>
+        <p>START SPINNING THE WHEEL</p>
+        <button id="btnAction">2. ENGAGE RESISTANCE (LVL 5)</button>
     </div>
 
-    <div id="log">Awaiting connection...</div>
+    <div id="log">Ready...</div>
 
 <script>
     const SERVICE_WAHOO = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
     const CHAR_CONTROL = 'a026e002-0a7d-4ab3-97fa-f1500f9feb8b';
-
     let controlChar = null;
 
     function addLog(m) {
@@ -36,20 +34,6 @@
         l.innerText += `\n> ${m}`;
         l.scrollTop = l.scrollHeight;
     }
-
-    async function sendCmd(data, label) {
-        if (!controlChar) return;
-        try {
-            addLog(`Sending ${label}...`);
-            await controlChar.writeValue(new Uint8Array(data));
-        } catch (e) { addLog("Err: " + e.message); }
-    }
-
-    // Op 0x04: Resistance. Sending 50 (0x32) for Level 5
-    document.getElementById('btnFtmsLevel').onclick = () => sendCmd([0x04, 0x32], "Level 5");
-
-    // Op 0x05: Power. 200W (0xC8 0x00)
-    document.getElementById('btnFtmsPower').onclick = () => sendCmd([0x05, 0xC8, 0x00], "200W");
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
@@ -66,18 +50,25 @@
             
             controlChar.addEventListener('characteristicvaluechanged', (e) => {
                 const hex = Array.from(new Uint8Array(e.target.value.buffer)).map(b => b.toString(16).padStart(2,'0')).join(' ');
-                addLog(`REPLY: ${hex}`);
+                addLog(`KICKR: ${hex}`);
             });
 
-            // Handshake Sequence
+            // THE HYBRID HANDSHAKE
+            addLog("Step 1: Unlocking...");
             await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
             await new Promise(r => setTimeout(r, 400));
-            await controlChar.writeValue(new Uint8Array([0x01])); // Reset
-            await new Promise(r => setTimeout(r, 400));
-            await controlChar.writeValue(new Uint8Array([0x00])); // Take Control
             
-            addLog("Ready.");
+            addLog("Step 2: Authorizing (0x03)...");
+            await controlChar.writeValue(new Uint8Array([0x03]));
+            addLog("Ready to engage.");
         } catch (err) { addLog("Error: " + err.message); }
+    };
+
+    document.getElementById('btnAction').onclick = async () => {
+        if (!controlChar) return;
+        addLog("Attempting Resistance Level 5...");
+        // Sending FTMS command 0x04 (Resistance) with value 50 (0x32)
+        await controlChar.writeValue(new Uint8Array([0x04, 0x32]));
     };
 </script>
 </body>
