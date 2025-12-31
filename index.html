@@ -3,25 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Arctic Husky</title>
+    <title>KICKR Crimson Jaguar</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; background: #2c3e50; color: #ecf0f1; text-align: center; }
-        .version { font-size: 12px; color: #bdc3c7; margin-bottom: 10px; }
-        .card { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #7f8c8d; }
-        .val { font-size: 48px; font-weight: bold; color: #2ecc71; }
-        button { background: #ecf0f1; color: #2c3e50; border: none; padding: 15px; border-radius: 8px; font-size: 16px; font-weight: bold; width: 45%; margin: 5px; }
-        #connectBtn { width: 100%; background: #2ecc71; color: white; margin-bottom: 20px; }
-        #log { font-family: monospace; font-size: 10px; color: #2ecc71; text-align: left; background: #000; padding: 10px; border-radius: 5px; height: 200px; overflow-y: auto; white-space: pre-wrap; }
+        body { font-family: -apple-system, sans-serif; padding: 20px; background: #1a0f0f; color: #f5f5f5; text-align: center; }
+        .version { font-size: 12px; color: #e74c3c; margin-bottom: 10px; font-weight: bold; }
+        .card { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #e74c3c; }
+        .val { font-size: 48px; font-weight: bold; color: #ffeb3b; }
+        button { background: #e74c3c; color: white; border: none; padding: 15px; border-radius: 8px; font-size: 16px; font-weight: bold; width: 45%; margin: 5px; }
+        #connectBtn { width: 100%; background: #fff; color: #1a0f0f; margin-bottom: 20px; }
+        #log { font-family: monospace; font-size: 10px; color: #00ff00; text-align: left; background: #000; padding: 10px; border-radius: 5px; height: 200px; overflow-y: auto; white-space: pre-wrap; }
     </style>
 </head>
 <body>
 
-    <div class="version">VERSION: ARCTIC HUSKY</div>
+    <div class="version">VERSION: CRIMSON JAGUAR</div>
     <button id="connectBtn">CONNECT KICKR</button>
 
     <div class="card">
         <div class="val" id="pwrDisplay">--W</div>
-        <div style="font-size: 12px; color: #bdc3c7;">ACTUAL POWER</div>
+        <div style="font-size: 12px; color: #888;">ACTUAL POWER</div>
     </div>
 
     <div class="card">
@@ -30,7 +30,7 @@
         <button id="upBtn">+10</button>
     </div>
 
-    <div id="log">Logs starting...</div>
+    <div id="log">System initialized...</div>
 
 <script>
     const SERVICE_POWER = '00001818-0000-1000-8000-00805f9b34fb';
@@ -48,10 +48,11 @@
     async function sendPower(w) {
         if (!controlChar) return;
         try {
-            // Trying the 0x42 (Erg Mode) command on the new candidate characteristic
-            const data = new Uint8Array([0x42, w & 0xFF, (w >> 8) & 0xFF]);
+            // Trying a different Command Header (0x05) which is sometimes 
+            // used for Target Power on early v1 firmwares
+            const data = new Uint8Array([0x05, w & 0xFF, (w >> 8) & 0xFF]);
             await controlChar.writeValue(data);
-            addLog(`Cmd Sent to ${controlChar.uuid.substring(4,8)}: ${w}W`);
+            addLog(`Cmd(0x05) Sent: ${w}W`);
         } catch (e) {
             addLog("Write Error: " + e.message);
         }
@@ -62,15 +63,16 @@
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
-            addLog("Scanning...");
+            addLog("Scanning (Restored Filters)...");
             const device = await navigator.bluetooth.requestDevice({
-                filters: [{ namePrefix: 'KICKR' }],
+                filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
                 optionalServices: [SERVICE_POWER, SERVICE_WAHOO]
             });
 
             const server = await device.gatt.connect();
             addLog("GATT Connected.");
 
+            // 1. Re-establishing Power Subscriptions from Silver Fox
             const pSvc = await server.getPrimaryService(SERVICE_POWER);
             const pChars = await pSvc.getCharacteristics();
             for (let c of pChars) {
@@ -79,26 +81,22 @@
                     c.oncharacteristicvaluechanged = (e) => {
                         const v = e.target.value;
                         if (v.byteLength >= 4) {
+                            // Extracting Watts from standard Cycling Power profile
                             document.getElementById('pwrDisplay').innerText = v.getUint16(2, true) + "W";
                         }
                     };
+                    addLog(`Power active: ${c.uuid.substring(4,8)}`);
                 }
             }
 
+            // 2. Control Setup using confirmed ID E002 from Blue Whale
             const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
+            controlChar = await wSvc.getCharacteristic('a026e002-0a7d-4ab3-97fa-f1500f9feb8b');
             
-            // SHIFTING TARGET: Based on diagnostic info, trying E001 instead of E002
-            try {
-                controlChar = await wSvc.getCharacteristic('a026e001-0a7d-4ab3-97fa-f1500f9feb8b');
-                addLog("Targeting Control: E001");
-            } catch (e) {
-                addLog("E001 not found, trying E002...");
-                controlChar = await wSvc.getCharacteristic('a026e002-0a7d-4ab3-97fa-f1500f9feb8b');
-            }
-
-            addLog("Unlocking...");
-            // We use E001 for the unlock as well
+            addLog("Unlocking E002...");
             await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+            
+            // Send initial power
             await sendPower(targetWatts);
             addLog("READY.");
 
