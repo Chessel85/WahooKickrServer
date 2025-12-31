@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Silver Fox</title>
+    <title>KICKR Arctic Husky</title>
     <style>
         body { font-family: -apple-system, sans-serif; padding: 20px; background: #2c3e50; color: #ecf0f1; text-align: center; }
         .version { font-size: 12px; color: #bdc3c7; margin-bottom: 10px; }
@@ -16,7 +16,7 @@
 </head>
 <body>
 
-    <div class="version">VERSION: SILVER FOX</div>
+    <div class="version">VERSION: ARCTIC HUSKY</div>
     <button id="connectBtn">CONNECT KICKR</button>
 
     <div class="card">
@@ -36,7 +36,7 @@
     const SERVICE_POWER = '00001818-0000-1000-8000-00805f9b34fb';
     const SERVICE_WAHOO = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
 
-    let writeChar = null;
+    let controlChar = null;
     let targetWatts = 100;
 
     function addLog(m) {
@@ -46,11 +46,12 @@
     }
 
     async function sendPower(w) {
-        if (!writeChar) return;
+        if (!controlChar) return;
         try {
+            // Trying the 0x42 (Erg Mode) command on the new candidate characteristic
             const data = new Uint8Array([0x42, w & 0xFF, (w >> 8) & 0xFF]);
-            await writeChar.writeValue(data);
-            addLog(`Cmd Sent: ${w}W`);
+            await controlChar.writeValue(data);
+            addLog(`Cmd Sent to ${controlChar.uuid.substring(4,8)}: ${w}W`);
         } catch (e) {
             addLog("Write Error: " + e.message);
         }
@@ -63,14 +64,13 @@
         try {
             addLog("Scanning...");
             const device = await navigator.bluetooth.requestDevice({
-                filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
+                filters: [{ namePrefix: 'KICKR' }],
                 optionalServices: [SERVICE_POWER, SERVICE_WAHOO]
             });
 
             const server = await device.gatt.connect();
             addLog("GATT Connected.");
 
-            // 1. Power Investigation - Searching for the data stream
             const pSvc = await server.getPrimaryService(SERVICE_POWER);
             const pChars = await pSvc.getCharacteristics();
             for (let c of pChars) {
@@ -78,35 +78,27 @@
                     await c.startNotifications();
                     c.oncharacteristicvaluechanged = (e) => {
                         const v = e.target.value;
-                        // Diagnostic: Show the raw byte length to see if data is coming in
                         if (v.byteLength >= 4) {
-                            const w = v.getUint16(2, true);
-                            document.getElementById('pwrDisplay').innerText = w + "W";
+                            document.getElementById('pwrDisplay').innerText = v.getUint16(2, true) + "W";
                         }
                     };
-                    addLog(`Subscribed to Power ID: ${c.uuid.substring(0,4)}`);
                 }
             }
 
-            // 2. Control Setup - Using the confirmed ID E002
             const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
-            writeChar = await wSvc.getCharacteristic('a026e002-0a7d-4ab3-97fa-f1500f9feb8b');
             
-            // Also listen to E002/E004 for any "KICKR replies"
-            const wChars = await wSvc.getCharacteristics();
-            for (let c of wChars) {
-                if (c.properties.notify) {
-                    await c.startNotifications();
-                    c.oncharacteristicvaluechanged = (e) => {
-                        // Log hex of any reply from the trainer
-                        const hex = Array.from(new Uint8Array(e.target.value.buffer)).map(b => b.toString(16).padStart(2,'0')).join('');
-                        addLog(`KICKR Msg [${c.uuid.substring(0,4)}]: ${hex}`);
-                    };
-                }
+            // SHIFTING TARGET: Based on diagnostic info, trying E001 instead of E002
+            try {
+                controlChar = await wSvc.getCharacteristic('a026e001-0a7d-4ab3-97fa-f1500f9feb8b');
+                addLog("Targeting Control: E001");
+            } catch (e) {
+                addLog("E001 not found, trying E002...");
+                controlChar = await wSvc.getCharacteristic('a026e002-0a7d-4ab3-97fa-f1500f9feb8b');
             }
 
             addLog("Unlocking...");
-            await writeChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+            // We use E001 for the unlock as well
+            await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
             await sendPower(targetWatts);
             addLog("READY.");
 
