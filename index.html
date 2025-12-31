@@ -3,38 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Komodo Dragon</title>
+    <title>KICKR Electric Eel</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 15px; background: #1a1a1a; color: #fff; text-align: center; }
-        .version { font-size: 12px; color: #00ffcc; margin-bottom: 10px; font-weight: bold; }
-        .card { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #00ffcc; }
-        .val { font-size: 42px; font-weight: bold; color: #00ffcc; }
-        button { background: #00ffcc; color: #000; border: none; padding: 12px; border-radius: 8px; font-size: 14px; font-weight: bold; margin: 5px; width: 45%; }
-        .cmd-btn { background: #ff3366; color: white; width: 90%; }
-        #connectBtn { width: 100%; background: #fff; color: #000; height: 50px; font-size: 18px; margin-bottom: 15px; }
-        #log { font-family: monospace; font-size: 10px; color: #00ffcc; text-align: left; background: #000; padding: 10px; border-radius: 5px; height: 220px; overflow-y: auto; white-space: pre-wrap; }
+        body { font-family: -apple-system, sans-serif; padding: 15px; background: #001a1a; color: #fff; text-align: center; }
+        .version { font-size: 12px; color: #00ffff; margin-bottom: 10px; font-weight: bold; }
+        .card { background: rgba(0,255,255,0.05); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #00ffff; }
+        .val { font-size: 42px; font-weight: bold; color: #00ffff; }
+        button { background: #00ffff; color: #000; border: none; padding: 12px; border-radius: 8px; font-size: 14px; font-weight: bold; margin: 5px; width: 90%; }
+        .test-btn { background: #ffcc00; margin-bottom: 8px; }
+        #connectBtn { background: #fff; height: 50px; font-size: 18px; margin-bottom: 15px; }
+        #log { font-family: monospace; font-size: 10px; color: #00ffcc; text-align: left; background: #000; padding: 10px; border-radius: 5px; height: 200px; overflow-y: auto; white-space: pre-wrap; }
     </style>
 </head>
 <body>
 
-    <div class="version">VERSION: KOMODO DRAGON</div>
+    <div class="version">VERSION: ELECTRIC EEL</div>
     <button id="connectBtn">SCAN & CONNECT</button>
 
     <div class="card">
         <div class="val" id="pwrDisplay">--W</div>
-        <div style="font-size: 12px; color: #aaa;">LIVE POWER</div>
+        <div style="font-size: 12px; color: #888;">LIVE POWER</div>
     </div>
 
     <div class="card">
-        <div style="font-size: 14px; margin-bottom: 10px;">STEP 1: SET MODE</div>
-        <button class="cmd-btn" id="btnModeErg">ENABLE ERG MODE (0x42)</button>
-        <button class="cmd-btn" id="btnModeLevel">ENABLE LEVEL MODE (0x41)</button>
-        
-        <div style="font-size: 14px; margin: 15px 0 10px;">STEP 2: TEST TARGET (150W)</div>
-        <button id="btnSend150" style="width: 90%; background: #fff;">SEND 150W TARGET</button>
+        <div style="font-size: 14px; margin-bottom: 10px; color: #00ffff;">TEST AUTHORIZATION KEYS</div>
+        <button class="test-btn" id="btnReq00">1. REQUEST CONTROL (0x00)</button>
+        <button class="test-btn" id="btnReq01">2. RESET/TAKE CONTROL (0x01)</button>
+        <button class="test-btn" id="btnReq42">3. INIT ERG MODE (0x42)</button>
+        <hr style="border: 0; border-top: 1px solid #333; margin: 10px;">
+        <button id="btnSend150" style="background: #fff;">TEST 150W TARGET</button>
     </div>
 
-    <div id="log">Logs starting...</div>
+    <div id="log">Ready...</div>
 
 <script>
     const SERVICE_POWER = '00001818-0000-1000-8000-00805f9b34fb';
@@ -58,14 +58,11 @@
         } catch (e) { addLog("Err: " + e.message); }
     }
 
-    // Step 1: Tell the bike to enter ERG mode
-    document.getElementById('btnModeErg').onclick = () => sendRaw([0x42], "Set Erg Mode");
-    
-    // Step 1 Alternate: Tell the bike to enter Level mode (Resistance 0-9)
-    document.getElementById('btnModeLevel').onclick = () => sendRaw([0x41, 0x01], "Set Level 1");
-
-    // Step 2: Send the actual 150W target
-    document.getElementById('btnSend150').onclick = () => sendRaw([0x42, 0x96, 0x00], "150W Target");
+    // Logic: We are looking for a response that ends in "01" (Success)
+    document.getElementById('btnReq00').onclick = () => sendRaw([0x00], "Request Control (00)");
+    document.getElementById('btnReq01').onclick = () => sendRaw([0x01], "Reset Control (01)");
+    document.getElementById('btnReq42').onclick = () => sendRaw([0x42], "Init Erg (42)");
+    document.getElementById('btnSend150').onclick = () => sendRaw([0x42, 0x96, 0x00], "Target 150W");
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
@@ -75,10 +72,9 @@
             });
 
             const server = await device.gatt.connect();
-            addLog("Connected. Waiting 1.5s...");
+            addLog("Connected. Delaying 1.5s...");
             await new Promise(r => setTimeout(r, 1500));
 
-            // Power Stream (Proven logic)
             const pSvc = await server.getPrimaryService(SERVICE_POWER);
             const pChar = await pSvc.getCharacteristic(CHAR_POWER);
             await pChar.startNotifications();
@@ -86,21 +82,19 @@
                 document.getElementById('pwrDisplay').innerText = e.target.value.getUint16(2, true) + "W";
             });
 
-            // Control & Interrogation
             const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
             controlChar = await wSvc.getCharacteristic(CHAR_CONTROL);
             
-            // LISTEN for KICKR responses
             await controlChar.startNotifications();
             controlChar.addEventListener('characteristicvaluechanged', (e) => {
                 const hex = Array.from(new Uint8Array(e.target.value.buffer))
                                  .map(b => b.toString(16).padStart(2,'0')).join(' ');
-                addLog(`KICKR RESPONSE: ${hex}`);
+                addLog(`KICKR: ${hex}`);
             });
 
-            addLog("Unlocking...");
+            // Mandatory Unlock first
             await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
-            addLog("READY.");
+            addLog("Unlocked. Test Authorization buttons.");
 
         } catch (err) { addLog("Fatal: " + err.message); }
     };
