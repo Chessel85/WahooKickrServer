@@ -3,40 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Blue Whale v2</title>
+    <title>KICKR Golden Eagle</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; background: #001f3f; color: white; text-align: center; }
-        .version { font-size: 10px; color: #39cccc; margin-bottom: 10px; text-transform: uppercase; }
-        .data-card { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #39cccc; }
-        .val { font-size: 48px; font-weight: bold; color: #01ff70; line-height: 1; }
-        button { background: #007aff; color: white; border: none; padding: 15px; border-radius: 10px; font-size: 18px; font-weight: bold; width: 45%; margin: 5px; }
-        #connectBtn { width: 100%; background: #39cccc; color: #001f3f; margin-bottom: 20px; }
-        #log { font-family: monospace; font-size: 10px; color: #01ff70; text-align: left; background: black; padding: 10px; border-radius: 5px; height: 180px; overflow-y: auto; white-space: pre-wrap; }
+        body { font-family: -apple-system, sans-serif; padding: 20px; background: #1a1a00; color: #fff; text-align: center; }
+        .version { font-size: 12px; color: #ffd700; margin-bottom: 10px; font-weight: bold; }
+        .card { background: rgba(0,0,0,0.5); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #ffd700; }
+        .val { font-size: 42px; font-weight: bold; color: #ffd700; }
+        button { background: #ffd700; color: #000; border: none; padding: 15px; border-radius: 8px; font-size: 16px; font-weight: bold; width: 45%; margin: 5px; }
+        #connectBtn { width: 100%; background: #fff; margin-bottom: 20px; }
+        #log { font-family: monospace; font-size: 10px; color: #0f0; text-align: left; background: #000; padding: 10px; border-radius: 5px; height: 220px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #333; }
     </style>
 </head>
 <body>
 
-    <div class="version">Version: Blue Whale v2</div>
-    <button id="connectBtn">CONNECT KICKR</button>
+    <div class="version">VERSION: GOLDEN EAGLE</div>
+    <button id="connectBtn">SCAN KICKR</button>
 
-    <div class="data-card">
-        <div id="targetDisplay" class="val">100</div>
-        <button id="downBtn">- 10W</button>
-        <button id="upBtn">+ 10W</button>
+    <div class="card">
+        <div class="val" id="pwrDisplay">--W</div>
+        <div style="font-size: 12px; color: #aaa;">CURRENT POWER</div>
     </div>
 
-    <div class="data-card">
-        <div>WATTS: <span id="pwrDisplay" style="color:#01ff70">--</span></div>
-        <div>CADENCE: <span id="cadDisplay" style="color:#01ff70">--</span></div>
+    <div class="card">
+        <div id="targetDisplay" style="font-size: 24px; font-weight: bold;">Target: 100W</div>
+        <button id="downBtn">-10</button>
+        <button id="upBtn">+10</button>
     </div>
 
-    <div id="log">Ready to hunt...</div>
+    <div id="log">Awaiting start...</div>
 
 <script>
     const SERVICE_POWER = '00001818-0000-1000-8000-00805f9b34fb';
-    const SERVICE_WAHOO_EE01 = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
+    const SERVICE_WAHOO = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
 
-    let trainerChar = null;
+    let writeChar = null;
     let targetWatts = 100;
 
     function addLog(m) {
@@ -46,72 +46,79 @@
     }
 
     async function sendPower(w) {
-        if (!trainerChar) { addLog("No control handle!"); return; }
+        if (!writeChar) return;
         try {
             const data = new Uint8Array([0x42, w & 0xFF, (w >> 8) & 0xFF]);
-            await trainerChar.writeValue(data);
-            addLog(`Sent: ${w}W`);
+            await writeChar.writeValue(data);
+            addLog(`SENT ${w}W to ${writeChar.uuid.substring(0,8)}`);
         } catch (e) {
-            addLog("Cmd Fail: " + e.message);
+            addLog("WRITE ERROR: " + e.message);
         }
     }
 
-    document.getElementById('upBtn').onclick = () => { targetWatts += 10; document.getElementById('targetDisplay').innerText = targetWatts; sendPower(targetWatts); };
-    document.getElementById('downBtn').onclick = () => { targetWatts -= 10; document.getElementById('targetDisplay').innerText = targetWatts; sendPower(targetWatts); };
+    document.getElementById('upBtn').onclick = () => { targetWatts += 10; document.getElementById('targetDisplay').innerText = `Target: ${targetWatts}W`; sendPower(targetWatts); };
+    document.getElementById('downBtn').onclick = () => { targetWatts -= 10; document.getElementById('targetDisplay').innerText = `Target: ${targetWatts}W`; sendPower(targetWatts); };
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
-            addLog("Scanning...");
+            addLog("Scanning for KICKR...");
             const device = await navigator.bluetooth.requestDevice({
                 filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
-                optionalServices: [SERVICE_POWER, SERVICE_WAHOO_EE01]
+                optionalServices: [SERVICE_POWER, SERVICE_WAHOO]
             });
 
             const server = await device.gatt.connect();
-            addLog("Connected to " + device.name);
+            addLog("GATT Connected.");
 
-            // 1. POWER SERVICE
-            const pSvc = await server.getPrimaryService(SERVICE_POWER);
-            const chars = await pSvc.getCharacteristics();
-            for (let c of chars) {
-                if (c.uuid.includes('2a63')) {
-                    await c.startNotifications();
-                    c.oncharacteristicvaluechanged = (e) => {
-                        const v = e.target.value;
-                        document.getElementById('pwrDisplay').innerText = v.getUint16(2, true);
-                    };
-                    addLog("Power active.");
+            // STEP 1: Probe Power Service
+            try {
+                const pSvc = await server.getPrimaryService(SERVICE_POWER);
+                const pChars = await pSvc.getCharacteristics();
+                for (let c of pChars) {
+                    if (c.properties.notify) {
+                        await c.startNotifications();
+                        c.oncharacteristicvaluechanged = (e) => {
+                            const v = e.target.value;
+                            document.getElementById('pwrDisplay').innerText = v.getUint16(2, true) + "W";
+                        };
+                        addLog("Power Notifications: ON");
+                    }
                 }
-            }
+            } catch (e) { addLog("Power Svc missing/fail"); }
 
-            // 2. CONTROL SERVICE (EE01)
-            addLog("Exploring EE01...");
-            const wSvc = await server.getPrimaryService(SERVICE_WAHOO_EE01);
+            // STEP 2: Probe Control Service (The Investigation)
+            addLog("Investigating Service EE01...");
+            const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
             const wChars = await wSvc.getCharacteristics();
             
-            addLog(`Found ${wChars.length} chars in EE01`);
+            addLog(`Found ${wChars.length} characteristics in EE01:`);
             
             for (let c of wChars) {
-                addLog(`Char: ${c.uuid}`);
-                // On very old KICKRs, the control char might have a different UUID
-                // If it supports "Write", we'll try to use it as our trainerChar
+                let props = [];
+                if (c.properties.read) props.push("READ");
+                if (c.properties.write) props.push("WRITE");
+                if (c.properties.writeWithoutResponse) props.push("WRITE_NR");
+                if (c.properties.notify) props.push("NOTIFY");
+                
+                addLog(`ID: ${c.uuid.substring(0,8)} [${props.join(',')}]`);
+
+                // If it's a writeable characteristic, we'll try to use it
                 if (c.properties.write || c.properties.writeWithoutResponse) {
-                    trainerChar = c;
-                    addLog("Targeting writeable char: " + c.uuid.substring(0,8));
+                    writeChar = c;
                 }
             }
 
-            if (trainerChar) {
-                addLog("Unlocking...");
-                await trainerChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+            if (writeChar) {
+                addLog("Attempting Unlock on " + writeChar.uuid.substring(0,8));
+                await writeChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
                 await sendPower(targetWatts);
-                addLog("SYSTEM READY");
+                addLog("READY.");
             } else {
-                addLog("ERROR: No writeable char found!");
+                addLog("CRITICAL: No writeable characteristic found!");
             }
 
         } catch (err) {
-            addLog("Fatal: " + err.name + " " + err.message);
+            addLog(`FATAL: ${err.name} - ${err.message}`);
         }
     };
 </script>
