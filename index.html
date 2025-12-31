@@ -3,24 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Iron Python</title>
+    <title>KICKR King Cobra v2</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; background: #0a1a0a; color: #fff; text-align: center; }
-        .version { font-size: 12px; color: #2ecc71; margin-bottom: 10px; font-weight: bold; }
-        .card { background: rgba(46, 204, 113, 0.1); padding: 20px; border-radius: 15px; margin-bottom: 15px; border: 1px solid #2ecc71; }
-        button { background: #2ecc71; color: #000; border: none; padding: 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; margin: 10px 0; }
+        body { font-family: -apple-system, sans-serif; padding: 20px; background: #1a0000; color: #fff; text-align: center; }
+        .version { font-size: 12px; color: #ff3e3e; margin-bottom: 10px; font-weight: bold; }
+        .card { background: rgba(255, 62, 62, 0.1); padding: 20px; border-radius: 15px; margin-bottom: 15px; border: 1px solid #ff3e3e; }
+        button { background: #ff3e3e; color: #fff; border: none; padding: 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; margin: 10px 0; }
         #log { font-family: monospace; font-size: 11px; color: #00ff00; text-align: left; background: #000; padding: 10px; height: 250px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #333; }
-        .hit { color: #fff; background: #155724; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <div class="version">VERSION: IRON PYTHON</div>
-    <button id="connectBtn" style="background:#fff;">1. CONNECT KICKR</button>
+    <div class="version">VERSION: KING COBRA (LEVEL 5)</div>
+    <button id="connectBtn" style="background:#fff; color:#000;">1. CONNECT KICKR</button>
 
     <div class="card">
-        <p style="font-size: 14px; color: #2ecc71;">START SPINNING FIRST</p>
-        <button id="btnProbe">2. RUN RESISTANCE PROBE</button>
+        <p style="font-size: 14px;">START SPINNING</p>
+        <button id="btnFtmsLevel">2. SET RESISTANCE LEVEL 5</button>
+        <button id="btnFtmsPower">3. SET TARGET 200W</button>
     </div>
 
     <div id="log">Awaiting connection...</div>
@@ -31,14 +31,25 @@
 
     let controlChar = null;
 
-    function addLog(m, isHit = false) {
+    function addLog(m) {
         const l = document.getElementById('log');
-        const line = document.createElement('div');
-        if (isHit) line.className = 'hit';
-        line.innerText = `> ${m}`;
-        l.appendChild(line);
+        l.innerText += `\n> ${m}`;
         l.scrollTop = l.scrollHeight;
     }
+
+    async function sendCmd(data, label) {
+        if (!controlChar) return;
+        try {
+            addLog(`Sending ${label}...`);
+            await controlChar.writeValue(new Uint8Array(data));
+        } catch (e) { addLog("Err: " + e.message); }
+    }
+
+    // Op 0x04: Resistance. Sending 50 (0x32) for Level 5
+    document.getElementById('btnFtmsLevel').onclick = () => sendCmd([0x04, 0x32], "Level 5");
+
+    // Op 0x05: Power. 200W (0xC8 0x00)
+    document.getElementById('btnFtmsPower').onclick = () => sendCmd([0x05, 0xC8, 0x00], "200W");
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
@@ -54,49 +65,19 @@
             await controlChar.startNotifications();
             
             controlChar.addEventListener('characteristicvaluechanged', (e) => {
-                const val = new Uint8Array(e.target.value.buffer);
-                const hex = Array.from(val).map(b => b.toString(16).padStart(2,'0')).join(' ');
-                
-                // Only log if response code is 01 (Success)
-                // Responses look like: [01, CommandOp, Status]
-                // 01 is Success, 02 is Invalid Param, 03 is Invalid Op, 05 is Denied
-                if (val[0] === 0x01 && val[2] === 0x01) {
-                    addLog(`SUCCESS REPLY: ${hex}`, true);
-                }
+                const hex = Array.from(new Uint8Array(e.target.value.buffer)).map(b => b.toString(16).padStart(2,'0')).join(' ');
+                addLog(`REPLY: ${hex}`);
             });
 
-            // Standard Authorize Sequence
+            // Handshake Sequence
             await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
             await new Promise(r => setTimeout(r, 400));
-            await controlChar.writeValue(new Uint8Array([0x03]));
-            addLog("Ready for Probe.");
+            await controlChar.writeValue(new Uint8Array([0x01])); // Reset
+            await new Promise(r => setTimeout(r, 400));
+            await controlChar.writeValue(new Uint8Array([0x00])); // Take Control
+            
+            addLog("Ready.");
         } catch (err) { addLog("Error: " + err.message); }
-    };
-
-    document.getElementById('btnProbe').onclick = async () => {
-        if (!controlChar) return;
-        addLog("PROBE STARTING. Keep spinning...");
-
-        // Testing different "grammars" for OpCode 0x41 (Level/Resistance)
-        const levels = [0x05, 0x08, 0x10, 0x20]; // Various intensities
-        
-        for (let lvl of levels) {
-            const variations = [
-                { name: `Single Byte [41, ${lvl}]`, data: [0x41, lvl] },
-                { name: `Padding Front [41, 00, ${lvl}]`, data: [0x41, 0x00, lvl] },
-                { name: `Padding Back [41, ${lvl}, 00]`, data: [0x41, lvl, 0x00] },
-                { name: `Three Byte [41, 00, ${lvl}, 00]`, data: [0x41, 0x00, lvl, 0x00] }
-            ];
-
-            for (let v of variations) {
-                try {
-                    addLog(`Testing: ${v.name}`);
-                    await controlChar.writeValue(new Uint8Array(v.data));
-                    await new Promise(r => setTimeout(r, 400));
-                } catch (e) {}
-            }
-        }
-        addLog("PROBE FINISHED.");
     };
 </script>
 </body>
