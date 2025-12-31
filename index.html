@@ -3,25 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Golden Eagle</title>
+    <title>KICKR Silver Fox</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; background: #1a1a00; color: #fff; text-align: center; }
-        .version { font-size: 12px; color: #ffd700; margin-bottom: 10px; font-weight: bold; }
-        .card { background: rgba(0,0,0,0.5); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #ffd700; }
-        .val { font-size: 42px; font-weight: bold; color: #ffd700; }
-        button { background: #ffd700; color: #000; border: none; padding: 15px; border-radius: 8px; font-size: 16px; font-weight: bold; width: 45%; margin: 5px; }
-        #connectBtn { width: 100%; background: #fff; margin-bottom: 20px; }
-        #log { font-family: monospace; font-size: 10px; color: #0f0; text-align: left; background: #000; padding: 10px; border-radius: 5px; height: 220px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #333; }
+        body { font-family: -apple-system, sans-serif; padding: 20px; background: #2c3e50; color: #ecf0f1; text-align: center; }
+        .version { font-size: 12px; color: #bdc3c7; margin-bottom: 10px; }
+        .card { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #7f8c8d; }
+        .val { font-size: 48px; font-weight: bold; color: #2ecc71; }
+        button { background: #ecf0f1; color: #2c3e50; border: none; padding: 15px; border-radius: 8px; font-size: 16px; font-weight: bold; width: 45%; margin: 5px; }
+        #connectBtn { width: 100%; background: #2ecc71; color: white; margin-bottom: 20px; }
+        #log { font-family: monospace; font-size: 10px; color: #2ecc71; text-align: left; background: #000; padding: 10px; border-radius: 5px; height: 200px; overflow-y: auto; white-space: pre-wrap; }
     </style>
 </head>
 <body>
 
-    <div class="version">VERSION: GOLDEN EAGLE</div>
-    <button id="connectBtn">SCAN KICKR</button>
+    <div class="version">VERSION: SILVER FOX</div>
+    <button id="connectBtn">CONNECT KICKR</button>
 
     <div class="card">
         <div class="val" id="pwrDisplay">--W</div>
-        <div style="font-size: 12px; color: #aaa;">CURRENT POWER</div>
+        <div style="font-size: 12px; color: #bdc3c7;">ACTUAL POWER</div>
     </div>
 
     <div class="card">
@@ -30,7 +30,7 @@
         <button id="upBtn">+10</button>
     </div>
 
-    <div id="log">Awaiting start...</div>
+    <div id="log">Logs starting...</div>
 
 <script>
     const SERVICE_POWER = '00001818-0000-1000-8000-00805f9b34fb';
@@ -50,9 +50,9 @@
         try {
             const data = new Uint8Array([0x42, w & 0xFF, (w >> 8) & 0xFF]);
             await writeChar.writeValue(data);
-            addLog(`SENT ${w}W to ${writeChar.uuid.substring(0,8)}`);
+            addLog(`Cmd Sent: ${w}W`);
         } catch (e) {
-            addLog("WRITE ERROR: " + e.message);
+            addLog("Write Error: " + e.message);
         }
     }
 
@@ -61,7 +61,7 @@
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
-            addLog("Scanning for KICKR...");
+            addLog("Scanning...");
             const device = await navigator.bluetooth.requestDevice({
                 filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
                 optionalServices: [SERVICE_POWER, SERVICE_WAHOO]
@@ -70,55 +70,48 @@
             const server = await device.gatt.connect();
             addLog("GATT Connected.");
 
-            // STEP 1: Probe Power Service
-            try {
-                const pSvc = await server.getPrimaryService(SERVICE_POWER);
-                const pChars = await pSvc.getCharacteristics();
-                for (let c of pChars) {
-                    if (c.properties.notify) {
-                        await c.startNotifications();
-                        c.oncharacteristicvaluechanged = (e) => {
-                            const v = e.target.value;
-                            document.getElementById('pwrDisplay').innerText = v.getUint16(2, true) + "W";
-                        };
-                        addLog("Power Notifications: ON");
-                    }
+            // 1. Power Investigation - Searching for the data stream
+            const pSvc = await server.getPrimaryService(SERVICE_POWER);
+            const pChars = await pSvc.getCharacteristics();
+            for (let c of pChars) {
+                if (c.properties.notify) {
+                    await c.startNotifications();
+                    c.oncharacteristicvaluechanged = (e) => {
+                        const v = e.target.value;
+                        // Diagnostic: Show the raw byte length to see if data is coming in
+                        if (v.byteLength >= 4) {
+                            const w = v.getUint16(2, true);
+                            document.getElementById('pwrDisplay').innerText = w + "W";
+                        }
+                    };
+                    addLog(`Subscribed to Power ID: ${c.uuid.substring(0,4)}`);
                 }
-            } catch (e) { addLog("Power Svc missing/fail"); }
+            }
 
-            // STEP 2: Probe Control Service (The Investigation)
-            addLog("Investigating Service EE01...");
+            // 2. Control Setup - Using the confirmed ID E002
             const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
+            writeChar = await wSvc.getCharacteristic('a026e002-0a7d-4ab3-97fa-f1500f9feb8b');
+            
+            // Also listen to E002/E004 for any "KICKR replies"
             const wChars = await wSvc.getCharacteristics();
-            
-            addLog(`Found ${wChars.length} characteristics in EE01:`);
-            
             for (let c of wChars) {
-                let props = [];
-                if (c.properties.read) props.push("READ");
-                if (c.properties.write) props.push("WRITE");
-                if (c.properties.writeWithoutResponse) props.push("WRITE_NR");
-                if (c.properties.notify) props.push("NOTIFY");
-                
-                addLog(`ID: ${c.uuid.substring(0,8)} [${props.join(',')}]`);
-
-                // If it's a writeable characteristic, we'll try to use it
-                if (c.properties.write || c.properties.writeWithoutResponse) {
-                    writeChar = c;
+                if (c.properties.notify) {
+                    await c.startNotifications();
+                    c.oncharacteristicvaluechanged = (e) => {
+                        // Log hex of any reply from the trainer
+                        const hex = Array.from(new Uint8Array(e.target.value.buffer)).map(b => b.toString(16).padStart(2,'0')).join('');
+                        addLog(`KICKR Msg [${c.uuid.substring(0,4)}]: ${hex}`);
+                    };
                 }
             }
 
-            if (writeChar) {
-                addLog("Attempting Unlock on " + writeChar.uuid.substring(0,8));
-                await writeChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
-                await sendPower(targetWatts);
-                addLog("READY.");
-            } else {
-                addLog("CRITICAL: No writeable characteristic found!");
-            }
+            addLog("Unlocking...");
+            await writeChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+            await sendPower(targetWatts);
+            addLog("READY.");
 
         } catch (err) {
-            addLog(`FATAL: ${err.name} - ${err.message}`);
+            addLog(`Fatal: ${err.message}`);
         }
     };
 </script>
