@@ -1,169 +1,177 @@
-<!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>KICKR Control</title> </head> <body> <h1>Wahoo KICKR Dashboard</h1> <button id="connectButton">Scan for KICKR</button> <p id="status">Status: Disconnected</p> <p id="version">Version grizzlybear</p>
-Copy to clipboard
-<p>Target Power (Watts): <span id="targetWatts">100</span></p>
-<button id="decreaseButton" aria-label="Decrease target power by 10 watts">Minus 10</button>
-<button id="increaseButton" aria-label="Increase target power by 10 watts">Plus 10</button>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KICKR Control</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; line-height: 1.5; }
+        button { padding: 10px 15px; margin: 5px 0; cursor: pointer; }
+        #debugLog { background: #f4f4f4; border: 1px solid #ccc; height: 200px; overflow-y: scroll; font-family: monospace; font-size: 12px; padding: 10px; margin-top: 10px; }
+        .data-display { font-size: 1.2em; font-weight: bold; color: #d32f2f; }
+    </style>
+</head>
+<body>
+    <h1>Wahoo KICKR Dashboard</h1>
+    <button id="connectButton">Scan for KICKR</button>
+    <p id="status">Status: Disconnected</p>
+    
+    <p>Target Power (Watts): <span id="targetWatts" class="data-display">100</span></p>
+    <button id="decreaseButton">Minus 10</button>
+    <button id="increaseButton">Plus 10</button>
 
-<p id="currentPower">Current: --</p>
-<p id="cadenceDisplay">Cadence (RPM): --</p>
+    <p id="currentPower">Current: --</p>
+    <p id="cadenceDisplay">Cadence (RPM): --</p>
 
-<h2>Debug Log</h2>
-<button id="clearLog">Clear Debug Log</button>
-<div id="debugLog" role="log" aria-live="off"></div>
+    <hr>
+    <h2>Debug Log</h2>
+    <button id="clearLog">Clear Debug Log</button>
+    <div id="debugLog"></div>
 
 <script>
-const connectButton = document.getElementById('connectButton');
-const statusText = document.getElementById('status');
-const targetWattsSpan = document.getElementById('targetWatts');
-const currentPowerDisplay = document.getElementById('currentPower');
-const cadenceDisplay = document.getElementById('cadenceDisplay');
-const debugLog = document.getElementById('debugLog');
-const clearLogButton = document.getElementById('clearLog');
-const decreaseButton = document.getElementById('decreaseButton');
-const increaseButton = document.getElementById('increaseButton');
-const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
-const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
-const WAHOO_TRAINER_SERVICE = 'a026ee0d-0a7d-4ab3-97fa-f1500f9feb8b';
-const WAHOO_TRAINER_CHAR = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
-let targetWatts = 100;
-let trainerCharacteristic = null;
-let packetCount = 0;
-let lastRevCount = null;
-let lastRevTime = null;
-function addLog(message) { const timestamp = new Date().toLocaleTimeString(); const logEntry = document.createElement('p'); logEntry.textContent = [${timestamp}] ${message}; debugLog.appendChild(logEntry); console.log(message); }
-clearLogButton.addEventListener('click', () => {
-debugLog.innerHTML = '';
-addLog('Debug log cleared');
-});
-async function sendPowerTarget(watts) { if (!trainerCharacteristic) { addLog(Command failed: No trainer control available); return; }
-Copy to clipboard
-try {
-    const cmd = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
-    await trainerCharacteristic.writeValue(cmd);
-    const cmdHex = Array.from(cmd).map(b => b.toString(16).padStart(2, '0')).join(' ');
-    addLog(`Command sent: Set ${watts}W (bytes: ${cmdHex})`);
-} catch (error) {
-    addLog(`Command error: ${error.message}`);
-}
-}
-decreaseButton.addEventListener('click', async () => {
-targetWatts = Math.max(10, targetWatts - 10);
-targetWattsSpan.textContent = targetWatts;
-await sendPowerTarget(targetWatts);
-});
-increaseButton.addEventListener('click', async () => {
-targetWatts += 10;
-targetWattsSpan.textContent = targetWatts;
-await sendPowerTarget(targetWatts);
-});
-connectButton.addEventListener('click', async () => {
-try {
-statusText.textContent = "Status: Searching...";
-addLog('=== NEW CONNECTION ATTEMPT ===');
-packetCount = 0;
-lastRevCount = null;
-lastRevTime = null;
-Copy to clipboard
-    const device = await navigator.bluetooth.requestDevice({
-        filters: [{
-            services: [CYCLING_POWER_SERVICE]
-        }],
-        optionalServices: [CYCLING_POWER_SERVICE, WAHOO_TRAINER_SERVICE]
-    });
-    
-    const deviceName = device.name || "KICKR Device";
-    statusText.textContent = `Status: ${deviceName} Selected. Connecting...`;
-    addLog(`Device selected: ${deviceName}`);
-    
-    const server = await device.gatt.connect();
-    statusText.textContent = "Status: Handshaking with Trainer...";
-    addLog('GATT server connected');
-    
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    const powerService = await server.getPrimaryService(CYCLING_POWER_SERVICE);
-    const powerCharacteristic = await powerService.getCharacteristic(POWER_MEASUREMENT_CHAR);
-    addLog('Power measurement service acquired');
-    
-    try {
-        statusText.textContent = "Status: Accessing trainer control...";
-        const trainerService = await server.getPrimaryService(WAHOO_TRAINER_SERVICE);
-        trainerCharacteristic = await trainerService.getCharacteristic(WAHOO_TRAINER_CHAR);
-        
-        addLog('Trainer control service found');
-        
-        statusText.textContent = "Status: Unlocking trainer...";
-        const unlockCmd = new Uint8Array([0x20, 0xEE, 0xFC]);
-        await trainerCharacteristic.writeValue(unlockCmd);
-        
-        addLog('Unlock command sent successfully');
-        
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        await sendPowerTarget(targetWatts);
-        
-        statusText.textContent = "Status: Connected with control!";
-    } catch (controlError) {
-        statusText.textContent = "Status: Connected (read-only)";
-        addLog(`Trainer control unavailable: ${controlError.name} - ${controlError.message}`);
-        trainerCharacteristic = null;
+    const connectButton = document.getElementById('connectButton');
+    const statusText = document.getElementById('status');
+    const targetWattsSpan = document.getElementById('targetWatts');
+    const currentPowerDisplay = document.getElementById('currentPower');
+    const cadenceDisplay = document.getElementById('cadenceDisplay');
+    const debugLog = document.getElementById('debugLog');
+    const clearLogButton = document.getElementById('clearLog');
+    const decreaseButton = document.getElementById('decreaseButton');
+    const increaseButton = document.getElementById('increaseButton');
+
+    // Bluetooth UUIDs
+    const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
+    const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
+    const WAHOO_TRAINER_SERVICE = 'a026ee0d-0a7d-4ab3-97fa-f1500f9feb8b';
+    const WAHOO_TRAINER_CHAR = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
+
+    let targetWatts = 100;
+    let trainerCharacteristic = null;
+    let packetCount = 0;
+    let lastRevCount = null;
+    let lastRevTime = null;
+
+    function addLog(message) {
+        const timestamp = new Date().toLocaleTimeString();
+        const logEntry = document.createElement('p');
+        logEntry.style.margin = '2px 0';
+        logEntry.textContent = `[${timestamp}] ${message}`;
+        debugLog.appendChild(logEntry);
+        debugLog.scrollTop = debugLog.scrollHeight;
+        console.log(message);
     }
-    
-    await powerCharacteristic.startNotifications();
-    addLog('Power notifications started');
-    
-    powerCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
-        const value = event.target.value;
-        packetCount++;
-        
-        const flags = value.getUint8(0);
-        const watts = value.getUint16(2, true);
-        currentPowerDisplay.textContent = `Current: ${watts}W`;
-        
-        if (packetCount <= 5 || packetCount % 20 === 0) {
-            const bytes = [];
-            for (let i = 0; i < value.byteLength; i++) {
-                bytes.push(value.getUint8(i).toString(16).padStart(2, '0'));
-            }
-            addLog(`Packet ${packetCount}: ${value.byteLength} bytes, Flags: ${flags.toString(2).padStart(8, '0')}, Hex: ${bytes.join(' ')}`);
+
+    clearLogButton.addEventListener('click', () => {
+        debugLog.innerHTML = '';
+        addLog('Debug log cleared');
+    });
+
+    async function sendPowerTarget(watts) {
+        if (!trainerCharacteristic) {
+            addLog("Command failed: No trainer control available");
+            return;
         }
-        
-        if (value.byteLength >= 8 && (flags & 0x04)) {
-            const revCount = value.getUint16(4, true);
-            const eventTime = value.getUint16(6, true);
+        try {
+            // Wahoo KICKR v1 uses 0x42 for Erg Mode set point
+            const cmd = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
+            await trainerCharacteristic.writeValue(cmd);
+            const cmdHex = Array.from(cmd).map(b => b.toString(16).padStart(2, '0')).join(' ');
+            addLog(`Command sent: Set ${watts}W (bytes: ${cmdHex})`);
+        } catch (error) {
+            addLog(`Command error: ${error.message}`);
+        }
+    }
+
+    decreaseButton.addEventListener('click', async () => {
+        targetWatts = Math.max(10, targetWatts - 10);
+        targetWattsSpan.textContent = targetWatts;
+        await sendPowerTarget(targetWatts);
+    });
+
+    increaseButton.addEventListener('click', async () => {
+        targetWatts += 10;
+        targetWattsSpan.textContent = targetWatts;
+        await sendPowerTarget(targetWatts);
+    });
+
+    connectButton.addEventListener('click', async () => {
+        try {
+            statusText.textContent = "Status: Searching...";
+            addLog('=== NEW CONNECTION ATTEMPT ===');
             
-            if (lastRevCount !== null && lastRevTime !== null) {
-                const revDelta = (revCount - lastRevCount + 65536) % 65536;
-                const timeDelta = (eventTime - lastRevTime + 65536) % 65536;
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ services: [CYCLING_POWER_SERVICE] }],
+                optionalServices: [WAHOO_TRAINER_SERVICE]
+            });
+
+            statusText.textContent = `Status: ${device.name} Selected. Connecting...`;
+            addLog(`Device selected: ${device.name}`);
+
+            const server = await device.gatt.connect();
+            addLog('GATT server connected');
+
+            // Get Power Service
+            const powerService = await server.getPrimaryService(CYCLING_POWER_SERVICE);
+            const powerCharacteristic = await powerService.getCharacteristic(POWER_MEASUREMENT_CHAR);
+            
+            // Get Trainer Control Service
+            try {
+                const trainerService = await server.getPrimaryService(WAHOO_TRAINER_SERVICE);
+                trainerCharacteristic = await trainerService.getCharacteristic(WAHOO_TRAINER_CHAR);
                 
-                if (timeDelta > 0 && revDelta > 0 && revDelta < 10) {
-                    const timeInSeconds = timeDelta / 1024;
-                    const rpm = Math.round((revDelta / timeInSeconds) * 60);
+                addLog('Trainer control service found');
+                
+                // Unlock command for KICKR
+                const unlockCmd = new Uint8Array([0x20, 0xEE, 0xFC]);
+                await trainerCharacteristic.writeValue(unlockCmd);
+                addLog('Unlock command sent');
+                
+                await sendPowerTarget(targetWatts);
+                statusText.textContent = "Status: Connected with Control";
+            } catch (e) {
+                addLog("Trainer Control not available. Using Read-Only.");
+                statusText.textContent = "Status: Connected (Read-Only)";
+            }
+
+            // Power/Cadence Notifications
+            await powerCharacteristic.startNotifications();
+            powerCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+                const value = event.target.value;
+                const flags = value.getUint8(0);
+                const watts = value.getUint16(2, true);
+                currentPowerDisplay.textContent = `Current: ${watts}W`;
+
+                // Calculate Cadence if flags indicate presence (bit 2)
+                if (value.byteLength >= 8 && (flags & 0x04)) {
+                    const revCount = value.getUint16(4, true);
+                    const eventTime = value.getUint16(6, true);
                     
-                    if (rpm > 20 && rpm < 200) {
-                        cadenceDisplay.textContent = `Cadence (RPM): ${rpm}`;
+                    if (lastRevCount !== null && lastRevTime !== null) {
+                        const revDelta = (revCount - lastRevCount + 65536) % 65536;
+                        const timeDelta = (eventTime - lastRevTime + 65536) % 65536;
                         
-                        if (packetCount <= 5 || packetCount % 20 === 0) {
-                            addLog(`Cadence calc: ${revDelta} revs in ${timeDelta} time units = ${rpm} RPM`);
+                        if (timeDelta > 0 && revDelta > 0) {
+                            const rpm = Math.round((revDelta / (timeDelta / 1024)) * 60);
+                            if (rpm > 20 && rpm < 200) {
+                                cadenceDisplay.textContent = `Cadence (RPM): ${rpm}`;
+                            }
                         }
                     }
+                    lastRevCount = revCount;
+                    lastRevTime = eventTime;
                 }
-            }
-            
-            lastRevCount = revCount;
-            lastRevTime = eventTime;
+            });
+
+            device.addEventListener('gattserverdisconnected', () => {
+                statusText.textContent = "Status: Disconnected";
+                addLog('Device disconnected');
+            });
+
+        } catch (error) {
+            statusText.textContent = `Status: Error - ${error.message}`;
+            addLog(`ERROR: ${error.message}`);
         }
     });
-    
-    device.addEventListener('gattserverdisconnected', () => {
-        statusText.textContent = "Status: Disconnected";
-        addLog('Device disconnected');
-        trainerCharacteristic = null;
-    });
-    
-} catch (error) {
-    statusText.textContent = `Status: Error - ${error.message}`;
-    addLog(`ERROR: ${error.name} - ${error.message}`);
-}
-}); </script>
-</body> </html>
+</script>
+</body>
+</html>
