@@ -3,137 +3,143 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Gen 1 Control</title>
+    <title>KICKR Diagnostic Tool</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; background: #1a1a1a; color: white; }
-        .card { background: #2a2a2a; padding: 20px; border-radius: 12px; margin-bottom: 15px; text-align: center; }
-        button { background: #007aff; color: white; border: none; padding: 15px 25px; border-radius: 8px; font-size: 16px; font-weight: bold; margin: 5px; width: 45%; }
-        button:active { opacity: 0.7; }
-        #status { color: #aaa; font-size: 14px; margin-top: 10px; }
-        .val { font-size: 48px; font-weight: bold; color: #00ff00; display: block; }
-        #debugLog { background: #000; color: #00ff00; height: 150px; overflow-y: auto; font-family: monospace; font-size: 11px; padding: 10px; border-radius: 8px; text-align: left; }
+        body { font-family: -apple-system, sans-serif; padding: 15px; background: #121212; color: #e0e0e0; }
+        .box { background: #1e1e1e; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #333; }
+        button { background: #007aff; color: white; border: none; padding: 12px; border-radius: 6px; width: 100%; font-weight: bold; margin-top: 5px; }
+        #log { font-family: monospace; font-size: 11px; background: #000; padding: 10px; border-radius: 5px; height: 300px; overflow-y: auto; white-space: pre-wrap; color: #00ff00; }
+        .stat { font-size: 20px; color: #00ff00; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <div class="card">
-        <div id="status">Ready to Scan</div>
-        <button id="connectButton" style="width: 100%; margin-bottom: 15px;">CONNECT KICKR</button>
+    <div class="box">
+        <h3>1. Discovery</h3>
+        <button id="btnConnect">SCAN & DIAGNOSE</button>
+        <p id="status" style="font-size: 12px; color: #888;">Ready.</p>
     </div>
 
-    <div class="card">
-        <span>TARGET POWER</span>
-        <span id="targetWatts" class="val">100</span>
-        <button id="decreaseButton">- 10W</button>
-        <button id="increaseButton">+ 10W</button>
-    </div>
-
-    <div class="card">
-        <div style="display:flex; justify-content: space-around;">
-            <div>POWER<br><span id="currentPower" class="val" style="font-size:32px;">--</span></div>
-            <div>CADENCE<br><span id="cadenceDisplay" class="val" style="font-size:32px;">--</span></div>
+    <div class="box">
+        <div style="display:flex; justify-content: space-around; text-align: center;">
+            <div>POWER<br><span id="valPower" class="stat">--</span></div>
+            <div>CADENCE<br><span id="valCad" class="stat">--</span></div>
+            <div>TARGET<br><span id="valTarget" class="stat">100</span></div>
+        </div>
+        <div style="display:flex; gap: 5px; margin-top:10px;">
+            <button id="btnDown">-10</button>
+            <button id="btnUp">+10</button>
         </div>
     </div>
 
-    <div id="debugLog"></div>
+    <div class="box">
+        <h3>System Log</h3>
+        <div id="log">Waiting for connection...</div>
+    </div>
 
 <script>
-    const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
-    const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
-    const WAHOO_TRAINER_SERVICE = 'a026ee0d-0a7d-4ab3-97fa-f1500f9feb8b';
-    const WAHOO_TRAINER_CHAR = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
-
-    let targetWatts = 100;
+    const logEl = document.getElementById('log');
+    const statusEl = document.getElementById('status');
     let trainerChar = null;
-    let lastRevCount = null;
-    let lastRevTime = null;
+    let targetPower = 100;
 
-    function log(msg) {
-        const div = document.getElementById('debugLog');
-        div.innerHTML += `> ${msg}<br>`;
-        div.scrollTop = div.scrollHeight;
+    function addLog(msg) {
+        const time = new Date().toLocaleTimeString().split(' ')[0];
+        logEl.innerText += `\n[${time}] ${msg}`;
+        logEl.scrollTop = logEl.scrollHeight;
+        console.log(msg);
     }
 
-    async function sendPower(watts) {
+    // Generic function to set power
+    async function updatePower(p) {
         if (!trainerChar) return;
         try {
-            // KICKR Erg Mode Command: 0x42 followed by watts in Little Endian
-            const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
+            const data = new Uint8Array([0x42, p & 0xFF, (p >> 8) & 0xFF]);
             await trainerChar.writeValue(data);
-            log(`Sent: ${watts}W`);
+            addLog(`SENT POWER: ${p}W`);
         } catch (e) {
-            log(`Write Error: ${e.message}`);
+            addLog(`WRITE ERROR: ${e.name} - ${e.message}`);
         }
     }
 
-    document.getElementById('increaseButton').onclick = () => { targetWatts += 10; document.getElementById('targetWatts').innerText = targetWatts; sendPower(targetWatts); };
-    document.getElementById('decreaseButton').onclick = () => { targetWatts = Math.max(50, targetWatts - 10); document.getElementById('targetWatts').innerText = targetWatts; sendPower(targetWatts); };
+    document.getElementById('btnUp').onclick = () => { targetPower += 10; document.getElementById('valTarget').innerText = targetPower; updatePower(targetPower); };
+    document.getElementById('btnDown').onclick = () => { targetPower -= 10; document.getElementById('valTarget').innerText = targetPower; updatePower(targetPower); };
 
-    document.getElementById('connectButton').onclick = async () => {
+    document.getElementById('btnConnect').onclick = async () => {
         try {
-            log("Starting scan...");
-            // CRITICAL: We must request BOTH services in the filter for iOS/Bluefy to allow writing
+            logEl.innerText = "Starting Discovery...";
+            
+            // We filter for the KICKR name prefix to be less restrictive
             const device = await navigator.bluetooth.requestDevice({
-                filters: [{ services: [CYCLING_POWER_SERVICE] }],
-                optionalServices: [WAHOO_TRAINER_SERVICE]
+                filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
+                optionalServices: [
+                    '00001818-0000-1000-8000-00805f9b34fb', // Cycling Power
+                    'a026ee0d-0a7d-4ab3-97fa-f1500f9feb8b', // Wahoo Trainer
+                    '0000181c-0000-1000-8000-00805f9b34fb'  // FTMS (Standard Control)
+                ]
             });
 
-            document.getElementById('status').innerText = "Connecting...";
+            statusEl.innerText = "Connecting to GATT...";
             const server = await device.gatt.connect();
-            log("GATT Connected");
+            addLog("Connected to GATT Server.");
 
-            // 1. Get Power Service (for reading)
-            const pService = await server.getPrimaryService(CYCLING_POWER_SERVICE);
-            const pChar = await pService.getCharacteristic(POWER_MEASUREMENT_CHAR);
-            
-            // 2. Get Wahoo Control Service (for writing)
-            try {
-                const tService = await server.getPrimaryService(WAHOO_TRAINER_SERVICE);
-                trainerChar = await tService.getCharacteristic(WAHOO_TRAINER_CHAR);
-                log("Control Service Found");
+            // DIAGNOSTIC: List all available services
+            addLog("Fetching Primary Services...");
+            const services = await server.getPrimaryServices();
+            addLog(`Found ${services.length} services.`);
 
-                // 3. THE UNLOCK CODE (Required for Gen 1 KICKR)
-                // Sending [0x20, 0xEE, 0xFC] tells the trainer to accept 3rd party commands
-                await trainerChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
-                log("Trainer Unlocked");
+            for (const service of services) {
+                addLog(`SERVICE: ${service.uuid}`);
                 
-                // Initial Power Set
-                await sendPower(targetWatts);
-                document.getElementById('status').innerText = "CONNECTED & CONTROLLED";
-            } catch (err) {
-                log(`Control Init Failed: ${err.message}`);
-                document.getElementById('status').innerText = "READ ONLY MODE";
+                // Inspect Cycling Power Service
+                if (service.uuid.includes('1818')) {
+                    const char = await service.getCharacteristic('00002a63-0000-1000-8000-00805f9b34fb');
+                    await char.startNotifications();
+                    char.oncharacteristicvaluechanged = handleData;
+                    addLog("  -> Power Notifications Active");
+                }
+
+                // Look for Wahoo Control Characteristic
+                if (service.uuid.includes('a026ee0d')) {
+                    trainerChar = await service.getCharacteristic('a026e005-0a7d-4ab3-97fa-f1500f9feb8b');
+                    addLog("  -> Wahoo Control Char Found!");
+                    
+                    // Unlock attempt
+                    addLog("  -> Sending Unlock (0x20EEFC)...");
+                    await trainerChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+                    addLog("  -> Unlock Sent.");
+                }
+                
+                // Check if it supports modern FTMS (standard control)
+                if (service.uuid.includes('181c')) {
+                    addLog("  -> FTMS Service Found (Unit supports modern standard)");
+                }
             }
 
-            // 4. Start Notifications for Power/Cadence
-            await pChar.startNotifications();
-            pChar.oncharacteristicvaluechanged = (e) => {
-                const val = e.target.value;
-                const watts = val.getUint16(2, true);
-                document.getElementById('currentPower').innerText = watts;
-
-                // Cadence calculation
-                if (val.byteLength >= 8) {
-                    const revs = val.getUint16(4, true);
-                    const time = val.getUint16(6, true);
-                    if (lastRevCount !== null) {
-                        const dR = (revs - lastRevCount + 65536) % 65536;
-                        const dT = (time - lastRevTime + 65536) % 65536;
-                        if (dT > 0) {
-                            const rpm = Math.round((dR / (dT / 1024)) * 60);
-                            if (rpm > 20 && rpm < 180) document.getElementById('cadenceDisplay').innerText = rpm;
-                        }
-                    }
-                    lastRevCount = revs;
-                    lastRevTime = time;
-                }
-            };
+            statusEl.innerText = "Connected: Check Logs";
+            if (trainerChar) await updatePower(targetPower);
 
         } catch (err) {
-            log(`Fatal Error: ${err.message}`);
-            document.getElementById('status').innerText = "Connection Failed";
+            addLog(`FATAL ERROR: ${err.name} - ${err.message}`);
+            statusEl.innerText = "Connection Failed.";
         }
     };
+
+    function handleData(event) {
+        const v = event.target.value;
+        const watts = v.getUint16(2, true);
+        document.getElementById('valPower').innerText = watts;
+
+        // Cadence (Bit 2 of Flags check)
+        const flags = v.getUint8(0);
+        if (v.byteLength >= 8 && (flags & 0x04)) {
+            // Basic cadence update logic
+            const revs = v.getUint16(4, true);
+            const time = v.getUint16(6, true);
+            // Simple RPM display logic (simplified for diagnostics)
+            document.getElementById('valCad').innerText = "OK"; 
+        }
+    }
 </script>
 </body>
 </html>
