@@ -2,32 +2,31 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>KICKR Electric Eel</title>
+    <title>KICKR Komodo Dragon</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #000; color: #fff; text-align: center; }
-        .version { font-size: 12px; color: #00ff00; font-weight: bold; margin-bottom: 10px; }
-        .card { background: rgba(0, 255, 0, 0.05); padding: 20px; border-radius: 15px; border: 1px solid #00ff00; margin-bottom: 20px; }
-        button { background: #00ff00; color: #000; border: none; padding: 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; margin: 10px 0; }
-        #log { font-family: monospace; font-size: 11px; color: #00ff00; text-align: left; background: #000; padding: 15px; height: 300px; overflow-y: auto; border: 1px solid #333; white-space: pre-wrap; }
+        body { font-family: sans-serif; padding: 20px; background: #1a1a1a; color: #fff; text-align: center; }
+        .version { font-size: 12px; color: #ff5722; font-weight: bold; margin-bottom: 10px; }
+        button { background: #ff5722; color: #fff; border: none; padding: 20px; border-radius: 12px; font-size: 16px; font-weight: bold; width: 100%; margin: 8px 0; }
+        #log { font-family: monospace; font-size: 10px; color: #00ff00; text-align: left; background: #000; padding: 15px; height: 300px; overflow-y: auto; border: 1px solid #333; white-space: pre-wrap; }
     </style>
 </head>
 <body>
-    <div class="version">VERSION: ELECTRIC EEL</div>
+    <div class="version">VERSION: KOMODO DRAGON</div>
     
-    <button id="connectBtn" style="background:#fff;">1. CONNECT & UNLOCK E002</button>
-    <button id="btnScanE005">2. SCAN FOR E005</button>
-    <button id="btn180" style="background:#00ff00;">3. SET 180W</button>
+    <button id="connectBtn">1. DEEP SCAN & CONNECT</button>
+    <button id="btn180" style="background: #4caf50;">2. TEST 180W (ALL CHR)</button>
 
     <div id="log">Awaiting start...</div>
 
 <script>
     const SERVICE_WAHOO = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
-    const CHAR_E002_UUID = 'a026e002-0a7d-4ab3-97fa-f1500f9feb8b';
-    const CHAR_E005_UUID = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
+    // We will attempt to write to anything that looks like a control point
+    const POTENTIAL_CHARS = [
+        'a026e005-0a7d-4ab3-97fa-f1500f9feb8b',
+        'a026e002-0a7d-4ab3-97fa-f1500f9feb8b'
+    ];
 
-    let gattServer = null;
-    let wahooService = null;
-    let charE005 = null;
+    let foundChars = [];
 
     function addLog(m) {
         const l = document.getElementById('log');
@@ -37,39 +36,47 @@
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
+            addLog("Requesting KICKR with explicit UUIDs...");
             const device = await navigator.bluetooth.requestDevice({
                 filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
                 optionalServices: [SERVICE_WAHOO]
             });
-            gattServer = await device.gatt.connect();
-            wahooService = await gattServer.getPrimaryService(SERVICE_WAHOO);
+
+            const server = await device.gatt.connect();
+            const service = await server.getPrimaryService(SERVICE_WAHOO);
             
-            addLog("Connected. Unlocking Management Door (E002)...");
-            const charE002 = await wahooService.getCharacteristic(CHAR_E002_UUID);
-            await charE002.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+            addLog("Connected. Mapping all available characteristics...");
+            const chars = await service.getCharacteristics();
             
-            addLog("E002 Unlocked. Now pedal for 5 seconds, then hit button 2.");
+            foundChars = chars;
+            addLog(`Found ${chars.length} characteristics.`);
+            
+            for (let c of chars) {
+                addLog(`Visible: ${c.uuid.substring(4, 8)}`);
+                // Attempt unlock on every char we found
+                try {
+                    await c.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+                    addLog(`Unlocked ${c.uuid.substring(4, 8)}`);
+                } catch(e) {}
+            }
+            
+            addLog("Setup complete. Start pedaling.");
         } catch (err) { addLog("Error: " + err.message); }
     };
 
-    document.getElementById('btnScanE005').onclick = async () => {
-        if (!wahooService) return;
-        try {
-            addLog("Probing for hidden E005 characteristic...");
-            // We re-fetch the service to force a cache refresh
-            wahooService = await gattServer.getPrimaryService(SERVICE_WAHOO);
-            charE005 = await wahooService.getCharacteristic(CHAR_E005_UUID);
-            addLog("SUCCESS! E005 found and mapped.");
-        } catch (err) { 
-            addLog("Still not visible. Try pedaling faster and clicking again."); 
-        }
-    };
-
     document.getElementById('btn180').onclick = async () => {
-        if (!charE005) { addLog("E005 not found yet!"); return; }
-        addLog("Writing 180W to E005...");
-        await charE005.writeValue(new Uint8Array([0x42, 0xB4, 0x00]));
-        addLog("Sent.");
+        if (foundChars.length === 0) return;
+        addLog("Firing 180W at all control points...");
+        const cmd = new Uint8Array([0x42, 0xB4, 0x00]);
+        
+        for (let c of foundChars) {
+            try {
+                await c.writeValue(cmd);
+                addLog(`Success write to: ${c.uuid.substring(4, 8)}`);
+            } catch(e) {
+                addLog(`Failed write to: ${c.uuid.substring(4, 8)}`);
+            }
+        }
     };
 </script>
 </body>
