@@ -2,45 +2,36 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>KICKR Billy Goat</title>
+    <title>KICKR Grizzly Bear</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; background: #2c3e50; color: #fff; text-align: center; }
-        .version { font-size: 12px; color: #bdc3c7; margin-bottom: 10px; font-weight: bold; text-transform: uppercase; }
-        .card { background: rgba(255, 255, 255, 0.1); padding: 25px; border-radius: 20px; border: 1px solid #ecf0f1; margin-bottom: 20px; }
-        button { background: #27ae60; color: #fff; border: none; padding: 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; margin: 10px 0; cursor: pointer; }
-        #connectBtn { background: #fff; color: #2c3e50; }
-        #log { font-family: monospace; font-size: 11px; color: #2ecc71; text-align: left; background: #000; padding: 15px; height: 200px; overflow-y: auto; border-radius: 10px; border: 1px solid #34495e; white-space: pre-wrap; }
-        .pwr-box { margin-bottom: 15px; }
-        .pwr-val { font-size: 54px; font-weight: bold; color: #2ecc71; }
+        body { font-family: sans-serif; padding: 20px; background: #1a0f00; color: #fff; text-align: center; }
+        .version { font-size: 12px; color: #e67e22; font-weight: bold; margin-bottom: 10px; }
+        .card { background: rgba(230, 126, 34, 0.1); padding: 20px; border-radius: 15px; border: 1px solid #e67e22; margin-bottom: 20px; }
+        button { background: #e67e22; color: #fff; border: none; padding: 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; margin: 10px 0; }
+        #log { font-family: monospace; font-size: 11px; color: #ffcc00; text-align: left; background: #000; padding: 15px; height: 250px; overflow-y: auto; border: 1px solid #333; white-space: pre-wrap; }
+        .pwr { font-size: 48px; color: #e67e22; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div class="version">VERSION: BILLY GOAT</div>
-
+    <div class="version">VERSION: GRIZZLY BEAR</div>
     <div class="card">
-        <div class="pwr-box">
-            <div id="pwrDisplay" class="pwr-val">--W</div>
-            <div style="font-size:12px; color:#bdc3c7;">LIVE POWER OUTPUT</div>
-        </div>
+        <div id="pwrDisplay" class="pwr">--W</div>
+        <div style="font-size:12px; color:#888;">LIVE POWER</div>
     </div>
 
-    <button id="connectBtn">1. CONNECT TO KICKR</button>
-    
-    <div class="card" style="border-color: #27ae60;">
-        <button id="btn180">2. ENGAGE 180W TARGET</button>
-        <button id="btnOff" style="background: #c0392b;">3. STOP / DISENGAGE</button>
-    </div>
+    <button id="connectBtn" style="background:#fff; color:#000;">1. CONNECT & DOUBLE UNLOCK</button>
+    <button id="btn180">2. SET 180W (E005)</button>
 
-    <div id="log">Awaiting Bluetooth initialization...</div>
+    <div id="log">Ready...</div>
 
 <script>
-    // Constants from the Python discovery
     const SERVICE_WAHOO = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
-    const CHAR_TRAINER_CONTROL = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b'; // The "Side Door"
+    const CHAR_E002 = 'a026e002-0a7d-4ab3-97fa-f1500f9feb8b';
+    const CHAR_E005 = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
     const SERVICE_POWER = '00001818-0000-1000-8000-00805f9b34fb';
-    const CHAR_POWER_READ = '00002a63-0000-1000-8000-00805f9b34fb';
+    const CHAR_POWER = '00002a63-0000-1000-8000-00805f9b34fb';
 
-    let controlChar = null;
+    let controlCharE005 = null;
 
     function addLog(m) {
         const l = document.getElementById('log');
@@ -50,64 +41,46 @@
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
-            addLog("Searching for KICKR...");
             const device = await navigator.bluetooth.requestDevice({
                 filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
                 optionalServices: [SERVICE_WAHOO, SERVICE_POWER]
             });
-
-            addLog("Found. Connecting...");
             const server = await device.gatt.connect();
-            
-            // Replicating Python "await asyncio.sleep(2.0)"
-            addLog("Link established. Stabilizing (2s)...");
-            await new Promise(r => setTimeout(r, 2000));
+            addLog("Connected.");
 
-            // Setup Power Read
+            const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
             const pSvc = await server.getPrimaryService(SERVICE_POWER);
-            const pChar = await pSvc.getCharacteristic(CHAR_POWER_READ);
+
+            // Start Power Monitoring
+            const pChar = await pSvc.getCharacteristic(CHAR_POWER);
             await pChar.startNotifications();
             pChar.oncharacteristicvaluechanged = (e) => {
-                const watts = e.target.value.getUint16(2, true);
-                document.getElementById('pwrDisplay').innerText = watts + "W";
-            };
-            addLog("Power monitoring active.");
-
-            // Setup Trainer Control (The e005 Side Door)
-            const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
-            controlChar = await wSvc.getCharacteristic(CHAR_TRAINER_CONTROL);
-            await controlChar.startNotifications();
-            controlChar.oncharacteristicvaluechanged = (e) => {
-                const hex = Array.from(new Uint8Array(e.target.value.buffer)).map(b => b.toString(16).padStart(2,'0')).join(' ');
-                addLog(`KICKR RESPONSE: ${hex}`);
+                document.getElementById('pwrDisplay').innerText = e.target.value.getUint16(2, true) + "W";
             };
 
-            // Replicating Python Unlock logic
-            addLog("Unlocking control point...");
-            await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
-            
-            // Replicating Python "await asyncio.sleep(1.0)"
+            // Double Unlock Sequence
+            addLog("Unlocking E002 (Management)...");
+            const charE002 = await wSvc.getCharacteristic(CHAR_E002);
+            await charE002.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
             await new Promise(r => setTimeout(r, 1000));
-            addLog("READY. Billy Goat is in control.");
 
-        } catch (err) {
-            addLog("FATAL ERROR: " + err.message);
+            addLog("Unlocking E005 (Action)...");
+            controlCharE005 = await wSvc.getCharacteristic(CHAR_E005);
+            await controlCharE005.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+            await new Promise(r => setTimeout(r, 1000));
+
+            addLog("Grizzly Bear is Ready.");
+        } catch (err) { 
+            addLog("ERROR: " + err.message); 
+            console.error(err);
         }
     };
 
     document.getElementById('btn180').onclick = async () => {
-        if (!controlChar) return;
-        const watts = 180;
-        addLog(`Requesting ${watts}W...`);
-        // Command 0x42 + Watts (Little Endian)
-        const cmd = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
-        await controlChar.writeValue(cmd);
-    };
-
-    document.getElementById('btnOff').onclick = async () => {
-        if (!controlChar) return;
-        addLog("Sending STOP command (0x45)...");
-        await controlChar.writeValue(new Uint8Array([0x45]));
+        if (!controlCharE005) return;
+        addLog("Sending 180W to E005...");
+        const cmd = new Uint8Array([0x42, 0xB4, 0x00]);
+        await controlCharE005.writeValue(cmd);
     };
 </script>
 </body>
