@@ -2,36 +2,34 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>KICKR Grizzly Bear</title>
+    <title>KICKR Honey Badger 2.0</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #1a0f00; color: #fff; text-align: center; }
-        .version { font-size: 12px; color: #e67e22; font-weight: bold; margin-bottom: 10px; }
-        .card { background: rgba(230, 126, 34, 0.1); padding: 20px; border-radius: 15px; border: 1px solid #e67e22; margin-bottom: 20px; }
-        button { background: #e67e22; color: #fff; border: none; padding: 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; margin: 10px 0; }
-        #log { font-family: monospace; font-size: 11px; color: #ffcc00; text-align: left; background: #000; padding: 15px; height: 250px; overflow-y: auto; border: 1px solid #333; white-space: pre-wrap; }
-        .pwr { font-size: 48px; color: #e67e22; font-weight: bold; }
+        body { font-family: sans-serif; padding: 20px; background: #1a1a00; color: #fff; text-align: center; }
+        .version { font-size: 12px; color: #f1c40f; font-weight: bold; margin-bottom: 10px; }
+        .card { background: rgba(241, 196, 15, 0.1); padding: 20px; border-radius: 15px; border: 1px solid #f1c40f; margin-bottom: 20px; }
+        button { background: #f1c40f; color: #000; border: none; padding: 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; margin: 10px 0; }
+        #log { font-family: monospace; font-size: 11px; color: #00ff00; text-align: left; background: #000; padding: 15px; height: 250px; overflow-y: auto; border: 1px solid #333; white-space: pre-wrap; }
     </style>
 </head>
 <body>
-    <div class="version">VERSION: GRIZZLY BEAR</div>
+    <div class="version">VERSION: HONEY BADGER 2.0</div>
     <div class="card">
-        <div id="pwrDisplay" class="pwr">--W</div>
+        <div id="pwrDisplay" style="font-size: 48px; font-weight: bold;">--W</div>
         <div style="font-size:12px; color:#888;">LIVE POWER</div>
     </div>
 
-    <button id="connectBtn" style="background:#fff; color:#000;">1. CONNECT & DOUBLE UNLOCK</button>
-    <button id="btn180">2. SET 180W (E005)</button>
+    <button id="connectBtn" style="background:#fff;">1. CONNECT & MAP SERVICES</button>
+    <button id="btn180">2. SET 180W</button>
 
     <div id="log">Ready...</div>
 
 <script>
     const SERVICE_WAHOO = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
-    const CHAR_E002 = 'a026e002-0a7d-4ab3-97fa-f1500f9feb8b';
-    const CHAR_E005 = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
-    const SERVICE_POWER = '00001818-0000-1000-8000-00805f9b34fb';
-    const CHAR_POWER = '00002a63-0000-1000-8000-00805f9b34fb';
+    const CHAR_E002_UUID = 'a026e002-0a7d-4ab3-97fa-f1500f9feb8b';
+    const CHAR_E005_UUID = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
 
-    let controlCharE005 = null;
+    let charE002 = null;
+    let charE005 = null;
 
     function addLog(m) {
         const l = document.getElementById('log');
@@ -41,46 +39,52 @@
 
     document.getElementById('connectBtn').onclick = async () => {
         try {
+            addLog("Requesting Device...");
             const device = await navigator.bluetooth.requestDevice({
                 filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
-                optionalServices: [SERVICE_WAHOO, SERVICE_POWER]
+                optionalServices: [SERVICE_WAHOO, '00001818-0000-1000-8000-00805f9b34fb']
             });
+            
             const server = await device.gatt.connect();
-            addLog("Connected.");
+            addLog("GATT Connected.");
 
             const wSvc = await server.getPrimaryService(SERVICE_WAHOO);
-            const pSvc = await server.getPrimaryService(SERVICE_POWER);
+            addLog("Wahoo Service found. Mapping characteristics...");
 
-            // Start Power Monitoring
-            const pChar = await pSvc.getCharacteristic(CHAR_POWER);
-            await pChar.startNotifications();
-            pChar.oncharacteristicvaluechanged = (e) => {
-                document.getElementById('pwrDisplay').innerText = e.target.value.getUint16(2, true) + "W";
-            };
+            // Get ALL characteristics to avoid the "Undefined" discovery error
+            const characteristics = await wSvc.getCharacteristics();
+            
+            for (const c of characteristics) {
+                if (c.uuid === CHAR_E002_UUID) charE002 = c;
+                if (c.uuid === CHAR_E005_UUID) charE005 = c;
+            }
 
-            // Double Unlock Sequence
-            addLog("Unlocking E002 (Management)...");
-            const charE002 = await wSvc.getCharacteristic(CHAR_E002);
+            if (!charE002 || !charE005) {
+                throw new Error("Could not find both E002 and E005 control points.");
+            }
+
+            addLog("Map Successful. Unlocking...");
+            
+            // Replicating Python sequence precisely
             await charE002.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
             await new Promise(r => setTimeout(r, 1000));
-
-            addLog("Unlocking E005 (Action)...");
-            controlCharE005 = await wSvc.getCharacteristic(CHAR_E005);
-            await controlCharE005.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+            
+            await charE005.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
             await new Promise(r => setTimeout(r, 1000));
 
-            addLog("Grizzly Bear is Ready.");
+            addLog("HONEY BADGER 2.0 READY.");
         } catch (err) { 
-            addLog("ERROR: " + err.message); 
-            console.error(err);
+            addLog("CRITICAL: " + err.message); 
         }
     };
 
     document.getElementById('btn180').onclick = async () => {
-        if (!controlCharE005) return;
-        addLog("Sending 180W to E005...");
-        const cmd = new Uint8Array([0x42, 0xB4, 0x00]);
-        await controlCharE005.writeValue(cmd);
+        if (!charE005) return;
+        addLog("Writing 180W to E005...");
+        try {
+            await charE005.writeValue(new Uint8Array([0x42, 0xB4, 0x00]));
+            addLog("Command Sent.");
+        } catch (e) { addLog("Write Fail: " + e.message); }
     };
 </script>
 </body>
