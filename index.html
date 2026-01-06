@@ -2,67 +2,373 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>KICKR Sidewinder v3</title>
-    <style>
-        body { font-family: sans-serif; padding: 15px; background: #000; color: #fff; text-align: center; }
-        button { background: #3498db; color: #fff; border: none; padding: 15px; border-radius: 8px; font-weight: bold; width: 100%; margin: 5px 0; }
-        #log { font-family: monospace; font-size: 10px; color: #00ff00; text-align: left; background: #111; padding: 10px; height: 350px; overflow-y: auto; white-space: pre-wrap; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wahoo KICKR Accessible Controller</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body>
-    <button id="connectBtn">1. CONNECT & AUTH</button>
-    <button id="btnStart" style="background: #2ecc71;">2. SEND START (0x07)</button>
-    <button id="btnSweep" style="background: #e67e22;">3. SWEEP (VALUE + STATUS)</button>
-    <div id="log">Awaiting connection...</div>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        
+        // Import lucide icons as inline SVG components
+        const Power = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.77.04"/>
+            </svg>
+        );
+        
+        const Bluetooth = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m7 7 10 10-5 5V2l5 5L7 17"/>
+            </svg>
+        );
+        
+        const AlertCircle = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+        );
+        
+        const Activity = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            </svg>
+        );
 
-<script>
-    const SERVICE_WAHOO = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
-    const CHAR_CONTROL = 'a026e002-0a7d-4ab3-97fa-f1500f9feb8b';
-    let controlChar = null;
+        function WahooKICKRController() {
+            const [device, setDevice] = useState(null);
+            const [controlChar, setControlChar] = useState(null);
+            const [powerChar, setPowerChar] = useState(null);
+            const [status, setStatus] = useState('Disconnected');
+            const [currentPower, setCurrentPower] = useState(0);
+            const [targetResistance, setTargetResistance] = useState(50);
+            const [log, setLog] = useState([]);
+            const [isUnlocked, setIsUnlocked] = useState(false);
 
-    function addLog(m) {
-        const l = document.getElementById('log');
-        l.innerText += `\n> ${m}`;
-        l.scrollTop = l.scrollHeight;
-    }
+            const WAHOO_SERVICE = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
+            const CONTROL_CHAR = 'a026e002-0a7d-4ab3-97fa-f1500f9feb8b';
+            const POWER_SERVICE = 0x1818;
+            const POWER_CHAR = 0x2a63;
 
-    document.getElementById('connectBtn').onclick = async () => {
-        try {
-            const device = await navigator.bluetooth.requestDevice({
-                filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
-                optionalServices: [SERVICE_WAHOO]
-            });
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService(SERVICE_WAHOO);
-            controlChar = await service.getCharacteristic(CHAR_CONTROL);
-            await controlChar.startNotifications();
-            
-            controlChar.oncharacteristicvaluechanged = (e) => {
-                const hex = Array.from(new Uint8Array(e.target.value.buffer)).map(b => b.toString(16).padStart(2,'0')).join(' ');
-                addLog(`KICKR REPLY: ${hex}`);
+            const addLog = (message, isError = false) => {
+                const timestamp = new Date().toLocaleTimeString();
+                setLog(prev => [...prev, { time: timestamp, msg: message, error: isError }]);
+                console.log(`[${timestamp}] ${message}`);
             };
 
-            await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC])); 
-            await new Promise(r => setTimeout(r, 500));
-            await controlChar.writeValue(new Uint8Array([0x03])); 
-            addLog("AUTH SENT. Wait for 01 03 09...");
-        } catch (err) { addLog("Err: " + err.message); }
-    };
+            const connect = async () => {
+                try {
+                    addLog('Requesting KICKR device...');
+                    const dev = await navigator.bluetooth.requestDevice({
+                        filters: [{ services: [WAHOO_SERVICE] }],
+                        optionalServices: [POWER_SERVICE]
+                    });
 
-    document.getElementById('btnStart').onclick = () => controlChar.writeValue(new Uint8Array([0x07]));
+                    addLog(`Found: ${dev.name}`);
+                    setStatus('Connecting...');
+                    
+                    const server = await dev.gatt.connect();
+                    addLog('Connected to GATT server');
 
-    document.getElementById('btnSweep').onclick = async () => {
-        for (let i = 0; i <= 200; i += 40) {
-            addLog(`Setting Resistance: ${i}`);
-            // Send Resistance
-            await controlChar.writeValue(new Uint8Array([0x04, i & 0xFF, (i >> 8) & 0xFF]));
-            await new Promise(r => setTimeout(r, 800));
-            // Request Status OpCode (guessing 0x00 for status in this mode)
-            addLog("Polling Status...");
-            await controlChar.writeValue(new Uint8Array([0x00]));
-            await new Promise(r => setTimeout(r, 800));
+                    const wahooService = await server.getPrimaryService(WAHOO_SERVICE);
+                    const control = await wahooService.getCharacteristic(CONTROL_CHAR);
+                    setControlChar(control);
+
+                    const powerService = await server.getPrimaryService(POWER_SERVICE);
+                    const power = await powerService.getCharacteristic(POWER_CHAR);
+                    setPowerChar(power);
+
+                    await control.startNotifications();
+                    control.addEventListener('characteristicvaluechanged', handleControlNotification);
+
+                    await power.startNotifications();
+                    power.addEventListener('characteristicvaluechanged', handlePowerNotification);
+
+                    setDevice(dev);
+                    setStatus('Connected - Ready to Unlock');
+                    addLog('Ready for unlock sequence');
+
+                } catch (error) {
+                    addLog(`Connection error: ${error.message}`, true);
+                    setStatus('Error');
+                }
+            };
+
+            const handleControlNotification = (event) => {
+                const value = event.target.value;
+                const bytes = Array.from(new Uint8Array(value.buffer));
+                const hex = bytes.map(b => b.toString(16).padStart(2, '0')).join(' ');
+                addLog(`Control Response: ${hex}`);
+
+                if (bytes.length >= 3 && bytes[0] === 0x01 && bytes[1] === 0x03 && bytes[2] === 0x09) {
+                    setIsUnlocked(true);
+                    setStatus('Unlocked - Ready for Control');
+                    addLog('✓ Master Control Achieved!');
+                }
+            };
+
+            const handlePowerNotification = (event) => {
+                const value = event.target.value;
+                const dataView = new DataView(value.buffer);
+                const watts = dataView.getUint16(2, true);
+                setCurrentPower(watts);
+            };
+
+            const unlock = async () => {
+                if (!controlChar) return;
+                
+                try {
+                    addLog('Sending unlock sequence...');
+                    await controlChar.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    addLog('Sending authorize...');
+                    await controlChar.writeValue(new Uint8Array([0x03]));
+                    
+                } catch (error) {
+                    addLog(`Unlock error: ${error.message}`, true);
+                }
+            };
+
+            const setResistance14Bit = async (percent) => {
+                if (!controlChar || !isUnlocked) return;
+                
+                try {
+                    const scaled = Math.round((percent / 100) * 16383);
+                    const bytes = [
+                        0x04,
+                        scaled & 0xFF,
+                        (scaled >> 8) & 0xFF
+                    ];
+                    
+                    addLog(`Setting 14-bit resistance: ${percent}% (raw: ${scaled})`);
+                    await controlChar.writeValue(new Uint8Array(bytes));
+                    
+                } catch (error) {
+                    addLog(`14-bit resistance error: ${error.message}`, true);
+                }
+            };
+
+            const setPowerWahooMode = async (watts) => {
+                if (!controlChar || !isUnlocked) return;
+                
+                try {
+                    addLog('Sending Start command (0x07)...');
+                    await controlChar.writeValue(new Uint8Array([0x07]));
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    
+                    const wattsScaled = Math.round(watts * 4);
+                    const bytes = [
+                        0x42,
+                        wattsScaled & 0xFF,
+                        (wattsScaled >> 8) & 0xFF
+                    ];
+                    
+                    addLog(`Setting Wahoo power: ${watts}W (scaled: ${wattsScaled})`);
+                    await controlChar.writeValue(new Uint8Array(bytes));
+                    
+                } catch (error) {
+                    addLog(`Wahoo power error: ${error.message}`, true);
+                }
+            };
+
+            const setERGMode = async (watts) => {
+                if (!controlChar || !isUnlocked) return;
+                
+                try {
+                    addLog('Attempting ERG mode activation (0x46)...');
+                    await controlChar.writeValue(new Uint8Array([0x46, 0x01]));
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    
+                    const wattsScaled = Math.round(watts * 4);
+                    const bytes = [
+                        0x42,
+                        wattsScaled & 0xFF,
+                        (wattsScaled >> 8) & 0xFF
+                    ];
+                    
+                    addLog(`Setting ERG target: ${watts}W`);
+                    await controlChar.writeValue(new Uint8Array(bytes));
+                    
+                } catch (error) {
+                    addLog(`ERG mode error: ${error.message}`, true);
+                }
+            };
+
+            const setResistanceFTMS = async (percent) => {
+                if (!controlChar || !isUnlocked) return;
+                
+                try {
+                    const scaled = Math.round(percent * 10);
+                    const bytes = [
+                        0x04,
+                        scaled & 0xFF,
+                        (scaled >> 8) & 0xFF
+                    ];
+                    
+                    addLog(`FTMS resistance: ${percent}% (raw: ${scaled})`);
+                    await controlChar.writeValue(new Uint8Array(bytes));
+                    
+                } catch (error) {
+                    addLog(`FTMS error: ${error.message}`, true);
+                }
+            };
+
+            const stopTrainer = async () => {
+                if (!controlChar || !isUnlocked) return;
+                
+                try {
+                    addLog('Sending Stop command...');
+                    await controlChar.writeValue(new Uint8Array([0x01]));
+                } catch (error) {
+                    addLog(`Stop error: ${error.message}`, true);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-900 text-white p-4">
+                    <div className="max-w-2xl mx-auto space-y-4">
+                        
+                        <div className="bg-gray-800 p-6 rounded-lg">
+                            <h1 className="text-2xl font-bold flex items-center gap-2 mb-2">
+                                <Activity />
+                                KICKR Accessible Controller
+                            </h1>
+                            <p className="text-gray-400">Status: {status}</p>
+                            <p className="text-2xl font-bold mt-2">
+                                <Power className="inline w-6 h-6" /> {currentPower}W
+                            </p>
+                        </div>
+
+                        {!device && (
+                            <button
+                                onClick={connect}
+                                className="w-full bg-blue-600 hover:bg-blue-700 p-4 rounded-lg text-xl font-bold flex items-center justify-center gap-2"
+                                aria-label="Connect to KICKR trainer"
+                            >
+                                <Bluetooth />
+                                Connect to KICKR
+                            </button>
+                        )}
+
+                        {device && !isUnlocked && (
+                            <button
+                                onClick={unlock}
+                                className="w-full bg-yellow-600 hover:bg-yellow-700 p-4 rounded-lg text-xl font-bold"
+                                aria-label="Unlock trainer for control"
+                            >
+                                Unlock Trainer
+                            </button>
+                        )}
+
+                        {isUnlocked && (
+                            <div className="bg-gray-800 p-6 rounded-lg space-y-4">
+                                <h2 className="text-xl font-bold">Control Methods</h2>
+                                
+                                <div className="space-y-2">
+                                    <label htmlFor="resistance" className="block text-lg">
+                                        Target Resistance: {targetResistance}%
+                                    </label>
+                                    <input
+                                        id="resistance"
+                                        type="range"
+                                        min="0"
+                                        max="100"
+                                        value={targetResistance}
+                                        onChange={(e) => setTargetResistance(Number(e.target.value))}
+                                        className="w-full h-12"
+                                        aria-label="Resistance percentage slider"
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        onClick={() => setResistance14Bit(targetResistance)}
+                                        className="bg-green-600 hover:bg-green-700 p-3 rounded"
+                                        aria-label="Test 14-bit resistance scaling"
+                                    >
+                                        14-bit Resistance
+                                    </button>
+                                    
+                                    <button
+                                        onClick={() => setResistanceFTMS(targetResistance)}
+                                        className="bg-green-600 hover:bg-green-700 p-3 rounded"
+                                        aria-label="Test FTMS standard resistance"
+                                    >
+                                        FTMS Resistance
+                                    </button>
+                                    
+                                    <button
+                                        onClick={() => setPowerWahooMode(150)}
+                                        className="bg-purple-600 hover:bg-purple-700 p-3 rounded"
+                                        aria-label="Test Wahoo power mode at 150 watts"
+                                    >
+                                        Wahoo Power (150W)
+                                    </button>
+                                    
+                                    <button
+                                        onClick={() => setERGMode(150)}
+                                        className="bg-purple-600 hover:bg-purple-700 p-3 rounded"
+                                        aria-label="Test ERG mode activation"
+                                    >
+                                        ERG Mode (150W)
+                                    </button>
+                                </div>
+
+                                <button
+                                    onClick={stopTrainer}
+                                    className="w-full bg-red-600 hover:bg-red-700 p-3 rounded font-bold"
+                                    aria-label="Stop trainer and release brake"
+                                >
+                                    STOP / Release
+                                </button>
+                            </div>
+                        )}
+
+                        <div className="bg-gray-800 p-4 rounded-lg">
+                            <h2 className="text-lg font-bold mb-2">Activity Log</h2>
+                            <div 
+                                className="space-y-1 max-h-64 overflow-y-auto font-mono text-sm"
+                                role="log"
+                                aria-live="polite"
+                                aria-atomic="false"
+                            >
+                                {log.slice(-10).reverse().map((entry, i) => (
+                                    <div 
+                                        key={i} 
+                                        className={entry.error ? 'text-red-400' : 'text-gray-300'}
+                                    >
+                                        [{entry.time}] {entry.msg}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="bg-blue-900 p-4 rounded-lg">
+                            <h3 className="font-bold flex items-center gap-2 mb-2">
+                                <AlertCircle />
+                                Testing Protocol
+                            </h3>
+                            <ol className="list-decimal list-inside space-y-1 text-sm">
+                                <li>Connect and unlock the trainer</li>
+                                <li>Start pedaling at a steady cadence</li>
+                                <li>Try "14-bit Resistance" first (most promising)</li>
+                                <li>Adjust slider and watch for physical brake engagement</li>
+                                <li>If no response, try other methods</li>
+                                <li>Check log for response codes</li>
+                            </ol>
+                        </div>
+
+                    </div>
+                </div>
+            );
         }
-    };
-</script>
+
+        ReactDOM.render(<WahooKICKRController />, document.getElementById('root'));
+    </script>
 </body>
 </html>
