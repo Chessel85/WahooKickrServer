@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Control</title>
+    <title>KICKR Control - Oaktree</title>
 </head>
 <body>
     <h1>Wahoo KICKR Dashboard</h1>
-<p style="font-size: 0.8em; color: gray;">Version: Cattlegrid</p>
+    <p style="font-size: 0.8em; color: gray;">Version: Oaktree</p>
+    
     <button id="connectButton">Scan for KICKR</button>
     <p id="status">Status: Disconnected</p>
     
@@ -17,6 +18,10 @@
     
     <p id="currentPower">Current: -- W</p>
 
+    <div id="debugLog" style="background: #000; color: #0f0; border: 1px solid #333; padding: 10px; margin-top: 20px; font-family: monospace; font-size: 11px; height: 200px; overflow-y: scroll;">
+        [Oaktree Ready] Waiting for user...<br>
+    </div>
+
     <script>
 const connectButton = document.getElementById('connectButton');
 const statusText = document.getElementById('status');
@@ -24,26 +29,35 @@ const targetWattsSpan = document.getElementById('targetWatts');
 const currentPowerDisplay = document.getElementById('currentPower');
 const decreaseButton = document.getElementById('decreaseButton');
 const increaseButton = document.getElementById('increaseButton');
+const debugLog = document.getElementById('debugLog');
 
-// UUIDs matching your Python script
+// Logging helper to see errors on iPhone
+function log(msg) {
+    const now = new Date();
+    const time = now.getHours() + ":" + now.getMinutes() + ":" + now.getSeconds();
+    debugLog.innerHTML += `[${time}] ${msg}<br>`;
+    debugLog.scrollTop = debugLog.scrollHeight;
+}
+
 const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
 const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
 const WAHOO_TRAINER_SERVICE = 'a026e001-0a7d-4ab3-97fa-f1500f9feb8b';
 const WAHOO_TRAINER_CHAR = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
 
 let targetWatts = 100;
-let controlCharacteristic = null; // We'll store this here to use in button clicks
+let controlCharacteristic = null;
 
-// Helper function to send power commands
 async function sendPowerToKickr(watts) {
-    if (!controlCharacteristic) return;
+    if (!controlCharacteristic) {
+        log("No control handle available.");
+        return;
+    }
     try {
-        // Python: bytes([0x42, watts & 0xFF, (watts >> 8) & 0xFF])
         const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
         await controlCharacteristic.writeValueWithResponse(data);
-        console.log(`Set target: ${watts}W`);
+        log(`Sent: ${watts}W`);
     } catch (error) {
-        console.error("Failed to set power:", error);
+        log("Send Error: " + error.message);
     }
 }
 
@@ -61,22 +75,31 @@ increaseButton.addEventListener('click', async () => {
 
 connectButton.addEventListener('click', async () => {
     try {
-        statusText.textContent = "Status: Searching for KICKR...";
+        log("Requesting device (Filtered)...");
+        statusText.textContent = "Status: Searching...";
         
+        // Logic kept exactly as Cattlegrid
         const device = await navigator.bluetooth.requestDevice({
-            filters: [{ namePrefix: 'KICKR' }, { services: [CYCLING_POWER_SERVICE] }],
+            filters: [{
+                services: [CYCLING_POWER_SERVICE]
+            }],
             optionalServices: [CYCLING_POWER_SERVICE, WAHOO_TRAINER_SERVICE]
         });
         
+        log("Selected: " + (device.name || "Unknown"));
         statusText.textContent = "Status: Connecting...";
+        
         const server = await device.gatt.connect();
-
-        // 1. Initial wait after connection (Python: sleep 2.0)
+        log("GATT Connected.");
+        
+        log("Delaying 2.0s...");
         await new Promise(resolve => setTimeout(resolve, 2000));
         
-        // 2. Setup Power Notifications (Read Only)
+        log("Accessing Power Service...");
         const powerService = await server.getPrimaryService(CYCLING_POWER_SERVICE);
         const powerChar = await powerService.getCharacteristic(POWER_MEASUREMENT_CHAR);
+        
+        log("Starting Power Notifications...");
         await powerChar.startNotifications();
         powerChar.addEventListener('characteristicvaluechanged', (event) => {
             const value = event.target.value;
@@ -84,37 +107,34 @@ connectButton.addEventListener('click', async () => {
             currentPowerDisplay.textContent = `Current: ${watts}W`;
         });
 
-        // 3. Setup Trainer Control (Read/Write)
+        log("Accessing Wahoo Service...");
         const trainerService = await server.getPrimaryService(WAHOO_TRAINER_SERVICE);
+        
+        log("Accessing Control Char...");
         controlCharacteristic = await trainerService.getCharacteristic(WAHOO_TRAINER_CHAR);
         
-        // Listen for "Accepted" responses (Python: trainer_callback)
+        log("Starting Control Notifications...");
         await controlCharacteristic.startNotifications();
         controlCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
-            console.log("Trainer Response:", Array.from(new Uint8Array(event.target.value.buffer)));
+            log("Trainer Msg: " + event.target.value.getUint8(0).toString(16));
         });
 
-        // 4. Wait before Unlock (Python: sleep 1.0)
+        log("Delaying 1.0s...");
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // 5. Unlock Trainer (Python: bytes([0x20, 0xEE, 0xFC]))
-        statusText.textContent = "Status: Unlocking Control...";
+        log("Sending Unlock...");
         const unlockCmd = new Uint8Array([0x20, 0xEE, 0xFC]);
         await controlCharacteristic.writeValueWithResponse(unlockCmd);
-
-        // 6. Final wait (Python: sleep 1.0)
+        
+        log("Delaying 1.0s...");
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         statusText.textContent = "Status: Ready!";
-        
-        device.addEventListener('gattserverdisconnected', () => {
-            statusText.textContent = "Status: Disconnected.";
-            controlCharacteristic = null;
-        });
+        log("Logic complete.");
         
     } catch (error) {
-        statusText.textContent = "Status: Error - " + error.message;
-        console.error(error);
+        log("ERROR: " + error.message);
+        statusText.textContent = "Status: Error - " + (error.message || "Unknown");
     }
 });
     </script>
