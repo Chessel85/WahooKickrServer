@@ -2,82 +2,121 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>KICKR Komodo Dragon</title>
-    <style>
-        body { font-family: sans-serif; padding: 20px; background: #1a1a1a; color: #fff; text-align: center; }
-        .version { font-size: 12px; color: #ff5722; font-weight: bold; margin-bottom: 10px; }
-        button { background: #ff5722; color: #fff; border: none; padding: 20px; border-radius: 12px; font-size: 16px; font-weight: bold; width: 100%; margin: 8px 0; }
-        #log { font-family: monospace; font-size: 10px; color: #00ff00; text-align: left; background: #000; padding: 15px; height: 300px; overflow-y: auto; border: 1px solid #333; white-space: pre-wrap; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KICKR Control</title>
 </head>
 <body>
-    <div class="version">VERSION: KOMODO DRAGON</div>
+    <h1>Wahoo KICKR Dashboard</h1>
+<p style="font-size: 0.8em; color: gray;">Version: Cattlegrid</p>
+    <button id="connectButton">Scan for KICKR</button>
+    <p id="status">Status: Disconnected</p>
     
-    <button id="connectBtn">1. DEEP SCAN & CONNECT</button>
-    <button id="btn180" style="background: #4caf50;">2. TEST 180W (ALL CHR)</button>
+    <p>Target Power: <span id="targetWatts">100</span>W</p>
+    <button id="decreaseButton">- 10W</button>
+    <button id="increaseButton">+ 10W</button>
+    
+    <p id="currentPower">Current: -- W</p>
 
-    <div id="log">Awaiting start...</div>
+    <script>
+const connectButton = document.getElementById('connectButton');
+const statusText = document.getElementById('status');
+const targetWattsSpan = document.getElementById('targetWatts');
+const currentPowerDisplay = document.getElementById('currentPower');
+const decreaseButton = document.getElementById('decreaseButton');
+const increaseButton = document.getElementById('increaseButton');
 
-<script>
-    const SERVICE_WAHOO = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
-    // We will attempt to write to anything that looks like a control point
-    const POTENTIAL_CHARS = [
-        'a026e005-0a7d-4ab3-97fa-f1500f9feb8b',
-        'a026e002-0a7d-4ab3-97fa-f1500f9feb8b'
-    ];
+// UUIDs matching your Python script
+const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
+const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
+const WAHOO_TRAINER_SERVICE = 'a026e001-0a7d-4ab3-97fa-f1500f9feb8b';
+const WAHOO_TRAINER_CHAR = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
 
-    let foundChars = [];
+let targetWatts = 100;
+let controlCharacteristic = null; // We'll store this here to use in button clicks
 
-    function addLog(m) {
-        const l = document.getElementById('log');
-        l.innerText += `\n> ${m}`;
-        l.scrollTop = l.scrollHeight;
+// Helper function to send power commands
+async function sendPowerToKickr(watts) {
+    if (!controlCharacteristic) return;
+    try {
+        // Python: bytes([0x42, watts & 0xFF, (watts >> 8) & 0xFF])
+        const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
+        await controlCharacteristic.writeValueWithResponse(data);
+        console.log(`Set target: ${watts}W`);
+    } catch (error) {
+        console.error("Failed to set power:", error);
     }
+}
 
-    document.getElementById('connectBtn').onclick = async () => {
-        try {
-            addLog("Requesting KICKR with explicit UUIDs...");
-            const device = await navigator.bluetooth.requestDevice({
-                filters: [{ namePrefix: 'KICKR' }, { namePrefix: 'WAHOO' }],
-                optionalServices: [SERVICE_WAHOO]
-            });
+decreaseButton.addEventListener('click', async () => {
+    targetWatts = Math.max(10, targetWatts - 10);
+    targetWattsSpan.textContent = targetWatts;
+    await sendPowerToKickr(targetWatts);
+});
 
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService(SERVICE_WAHOO);
-            
-            addLog("Connected. Mapping all available characteristics...");
-            const chars = await service.getCharacteristics();
-            
-            foundChars = chars;
-            addLog(`Found ${chars.length} characteristics.`);
-            
-            for (let c of chars) {
-                addLog(`Visible: ${c.uuid.substring(4, 8)}`);
-                // Attempt unlock on every char we found
-                try {
-                    await c.writeValue(new Uint8Array([0x20, 0xEE, 0xFC]));
-                    addLog(`Unlocked ${c.uuid.substring(4, 8)}`);
-                } catch(e) {}
-            }
-            
-            addLog("Setup complete. Start pedaling.");
-        } catch (err) { addLog("Error: " + err.message); }
-    };
+increaseButton.addEventListener('click', async () => {
+    targetWatts += 10;
+    targetWattsSpan.textContent = targetWatts;
+    await sendPowerToKickr(targetWatts);
+});
 
-    document.getElementById('btn180').onclick = async () => {
-        if (foundChars.length === 0) return;
-        addLog("Firing 180W at all control points...");
-        const cmd = new Uint8Array([0x42, 0xB4, 0x00]);
+connectButton.addEventListener('click', async () => {
+    try {
+        statusText.textContent = "Status: Searching for KICKR...";
         
-        for (let c of foundChars) {
-            try {
-                await c.writeValue(cmd);
-                addLog(`Success write to: ${c.uuid.substring(4, 8)}`);
-            } catch(e) {
-                addLog(`Failed write to: ${c.uuid.substring(4, 8)}`);
-            }
-        }
-    };
-</script>
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: 'KICKR' }, { services: [CYCLING_POWER_SERVICE] }],
+            optionalServices: [CYCLING_POWER_SERVICE, WAHOO_TRAINER_SERVICE]
+        });
+        
+        statusText.textContent = "Status: Connecting...";
+        const server = await device.gatt.connect();
+
+        // 1. Initial wait after connection (Python: sleep 2.0)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // 2. Setup Power Notifications (Read Only)
+        const powerService = await server.getPrimaryService(CYCLING_POWER_SERVICE);
+        const powerChar = await powerService.getCharacteristic(POWER_MEASUREMENT_CHAR);
+        await powerChar.startNotifications();
+        powerChar.addEventListener('characteristicvaluechanged', (event) => {
+            const value = event.target.value;
+            const watts = value.getUint16(2, true);
+            currentPowerDisplay.textContent = `Current: ${watts}W`;
+        });
+
+        // 3. Setup Trainer Control (Read/Write)
+        const trainerService = await server.getPrimaryService(WAHOO_TRAINER_SERVICE);
+        controlCharacteristic = await trainerService.getCharacteristic(WAHOO_TRAINER_CHAR);
+        
+        // Listen for "Accepted" responses (Python: trainer_callback)
+        await controlCharacteristic.startNotifications();
+        controlCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+            console.log("Trainer Response:", Array.from(new Uint8Array(event.target.value.buffer)));
+        });
+
+        // 4. Wait before Unlock (Python: sleep 1.0)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // 5. Unlock Trainer (Python: bytes([0x20, 0xEE, 0xFC]))
+        statusText.textContent = "Status: Unlocking Control...";
+        const unlockCmd = new Uint8Array([0x20, 0xEE, 0xFC]);
+        await controlCharacteristic.writeValueWithResponse(unlockCmd);
+
+        // 6. Final wait (Python: sleep 1.0)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        statusText.textContent = "Status: Ready!";
+        
+        device.addEventListener('gattserverdisconnected', () => {
+            statusText.textContent = "Status: Disconnected.";
+            controlCharacteristic = null;
+        });
+        
+    } catch (error) {
+        statusText.textContent = "Status: Error - " + error.message;
+        console.error(error);
+    }
+});
+    </script>
 </body>
 </html>
