@@ -3,24 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Scanner - Edinburgh</title>
+    <title>KICKR Control - Pony</title>
 </head>
 <body>
-    <h1>KICKR Service Scanner</h1>
-    <p style="font-size: 0.8em; color: gray;">Version: Edinburgh</p>
+    <h1>Wahoo KICKR Dashboard</h1>
+    <p style="font-size: 0.8em; color: gray;">Version: Oaktree</p>
     
-    <button id="connectButton">Scan & List Services</button>
-    <p id="status">Status: Idle</p>
+    <button id="connectButton">Scan for KICKR</button>
+    <p id="status">Status: Disconnected</p>
     
-    <div id="debugLog" style="background: #000; color: #0f0; border: 1px solid #333; padding: 10px; margin-top: 20px; font-family: monospace; font-size: 11px; height: 350px; overflow-y: scroll;">
-        [Edinburgh Ready] Tap button to begin discovery...<br>
+    <p>Target Power: <span id="targetWatts">100</span>W</p>
+    <button id="decreaseButton">- 10W</button>
+    <button id="increaseButton">+ 10W</button>
+    
+    <p id="currentPower">Current: -- W</p>
+
+    <div id="debugLog" style="background: #000; color: #0f0; border: 1px solid #333; padding: 10px; margin-top: 20px; font-family: monospace; font-size: 11px; height: 200px; overflow-y: scroll;">
+        [Oaktree Ready] Waiting for user...<br>
     </div>
 
     <script>
 const connectButton = document.getElementById('connectButton');
 const statusText = document.getElementById('status');
+const targetWattsSpan = document.getElementById('targetWatts');
+const currentPowerDisplay = document.getElementById('currentPower');
+const decreaseButton = document.getElementById('decreaseButton');
+const increaseButton = document.getElementById('increaseButton');
 const debugLog = document.getElementById('debugLog');
 
+// Logging helper to see errors on iPhone
 function log(msg) {
     const now = new Date();
     const time = now.getHours() + ":" + now.getMinutes() + ":" + now.getSeconds();
@@ -28,63 +39,102 @@ function log(msg) {
     debugLog.scrollTop = debugLog.scrollHeight;
 }
 
+const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
+const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
+const WAHOO_TRAINER_SERVICE = 'a026ee01-0a7d-4ab3-97fa-f1500f9feb8b';
+const WAHOO_TRAINER_CHAR = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b'; 
+
+let targetWatts = 100;
+let controlCharacteristic = null;
+
+async function sendPowerToKickr(watts) {
+    if (!controlCharacteristic) {
+        log("No control handle available.");
+        return;
+    }
+    try {
+        const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
+        await controlCharacteristic.writeValueWithResponse(data);
+        log(`Sent: ${watts}W`);
+    } catch (error) {
+        log("Send Error: " + error.message);
+    }
+}
+
+decreaseButton.addEventListener('click', async () => {
+    targetWatts = Math.max(10, targetWatts - 10);
+    targetWattsSpan.textContent = targetWatts;
+    await sendPowerToKickr(targetWatts);
+});
+
+increaseButton.addEventListener('click', async () => {
+    targetWatts += 10;
+    targetWattsSpan.textContent = targetWatts;
+    await sendPowerToKickr(targetWatts);
+});
+
 connectButton.addEventListener('click', async () => {
     try {
-        log("Initiating Scan (Accept All)...");
+        log("Requesting device (Filtered)...");
         statusText.textContent = "Status: Searching...";
         
-        // We use acceptAllDevices so the browser doesn't hide "unlisted" services
+        // Logic kept exactly as Cattlegrid
         const device = await navigator.bluetooth.requestDevice({
-            acceptAllDevices: true
+            filters: [{
+                services: [CYCLING_POWER_SERVICE]
+            }],
+            optionalServices: [CYCLING_POWER_SERVICE, WAHOO_TRAINER_SERVICE]
         });
         
-        log("Device Selected: " + (device.name || "Unknown Device"));
+        log("Selected: " + (device.name || "Unknown"));
         statusText.textContent = "Status: Connecting...";
         
         const server = await device.gatt.connect();
         log("GATT Connected.");
-
-        log("Waiting 2.0s for GATT table to populate...");
+        
+        log("Delaying 2.0s...");
         await new Promise(resolve => setTimeout(resolve, 2000));
         
-        statusText.textContent = "Status: Discovering Services...";
-        log("Fetching Primary Services...");
+        log("Accessing Power Service...");
+        const powerService = await server.getPrimaryService(CYCLING_POWER_SERVICE);
+        const powerChar = await powerService.getCharacteristic(POWER_MEASUREMENT_CHAR);
         
-        // This requests every service the device is broadcasting
-        const services = await server.getPrimaryServices();
-        
-        log(`Found ${services.length} services:`);
-        log("--------------------------------");
-
-        for (const service of services) {
-            log(`Service: ${service.uuid}`);
-            
-            // Optional: Try to see if our target characteristic lives inside this service
-            try {
-                const chars = await service.getCharacteristics();
-                for (const char of chars) {
-                    if (char.uuid.includes("a026e005")) {
-                        log(`>>> MATCH FOUND: a026e005 is inside this service!`);
-                    }
-                }
-            } catch (e) {
-                // Some services might be restricted by the browser
-                log(`   (Characteristics hidden for this service)`);
-            }
-        }
-        
-        log("--------------------------------");
-        log("Scan Complete.");
-        statusText.textContent = "Status: Scan Finished";
-        
-        device.addEventListener('gattserverdisconnected', () => {
-            log("Disconnected.");
-            statusText.textContent = "Status: Disconnected.";
+        log("Starting Power Notifications...");
+        await powerChar.startNotifications();
+        powerChar.addEventListener('characteristicvaluechanged', (event) => {
+            const value = event.target.value;
+            const watts = value.getUint16(2, true);
+            currentPowerDisplay.textContent = `Current: ${watts}W`;
         });
+
+        log("Accessing Wahoo Service...");
+        const trainerService = await server.getPrimaryService(WAHOO_TRAINER_SERVICE);
+        
+        log("Accessing Control Char...");
+        controlCharacteristic = await trainerService.getCharacteristic(WAHOO_TRAINER_CHAR);
+        
+        log("Starting Control Notifications...");
+        await controlCharacteristic.startNotifications();
+        controlCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+            log("Trainer Msg: " + event.target.value.getUint8(0).toString(16));
+        });
+
+        log("Delaying 1.0s...");
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        log("Sending Unlock...");
+        const unlockCmd = new Uint8Array([0x20, 0xEE, 0xFC]);
+        await controlCharacteristic.writeValueWithResponse(unlockCmd);
+        
+        log("Delaying 1.0s...");
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        statusText.textContent = "Status: Ready!";
+        log("Logic complete.");
         
     } catch (error) {
-        log("SCAN ERROR: " + error.message);
-        statusText.textContent = "Status: Error";
+        log("ERROR: " + error.message);
+        statusText.textContent = "Status: Error - " + (error.message || "Unknown");
     }
 });
     </script>
