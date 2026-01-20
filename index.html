@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Beech 12</title>
+    <title>KICKR Beech 14</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 10px; max-width: 500px; margin: auto; background: #fff; }
         .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
@@ -12,9 +12,13 @@
         .timer-display { width: 100%; font-size: 4rem; text-align: center; margin-bottom: 10px; padding: 20px 0; border: 3px solid #333; border-radius: 15px; }
         .button-row { display: flex; gap: 10px; margin-bottom: 10px; }
         .button-row button { flex: 1; padding: 30px 5px; font-size: 1.4rem; border-radius: 15px; border: 3px solid #000; font-weight: bold; background: #f8f8f8; }
+        
+        /* Simplified Info Grid for Single Swipes */
         .info-grid { display: flex; gap: 10px; margin-bottom: 10px; }
-        .info-cell { flex: 1; border: 3px solid #333; border-radius: 15px; padding: 20px 5px; text-align: center; font-size: 1.8rem; font-weight: bold; }
-        .info-cell span { font-size: 0.9rem; color: #666; display: block; margin-bottom: 5px; }
+        .info-cell { flex: 1; border: 3px solid #333; border-radius: 15px; padding: 20px 5px; text-align: center; cursor: pointer; }
+        .info-cell span { font-size: 0.9rem; color: #666; display: block; margin-bottom: 5px; pointer-events: none; }
+        .info-cell strong { font-size: 1.8rem; display: block; pointer-events: none; }
+
         .select-row { display: flex; gap: 10px; margin-top: 20px; }
         select { flex: 2; padding: 15px; border-radius: 12px; border: 2px solid #000; font-size: 1rem; }
         #loadWorkoutBtn { flex: 1; padding: 15px; border-radius: 12px; border: 2px solid #000; font-size: 1rem; font-weight: bold; }
@@ -24,25 +28,25 @@
 <body>
 
     <div class="top-row">
-        <button id="connectButton" onclick="initAudio()">Connect KICKR</button>
-        <div id="status" role="status">Beech 12: Disconnected</div>
+        <button id="connectButton">Connect KICKR</button>
+        <div id="status" role="status">Beech 14: Disconnected</div>
     </div>
 
-    <div class="timer-display" role="timer" aria-label="Clock">
+    <div class="timer-display" role="timer" id="clockContainer" tabIndex="0">
         <strong id="timerDisplay">0:00</strong>
     </div>
     
     <div class="button-row">
-        <button id="startPauseButton" onclick="initAudio()">Start</button>
-        <button id="beepToggleButton" onclick="initAudio()" aria-label="Beeps Off">Beeps Off</button>
+        <button id="startPauseButton">Start</button>
+        <button id="beepToggleButton">Beeps Off</button>
     </div>
 
     <div class="info-grid">
-        <div class="info-cell" aria-label="Target Watts">
+        <div class="info-cell" id="wattsCell" tabIndex="0" role="text">
             <span>Target</span>
             <strong id="targetWattsDisplay">150W</strong>
         </div>
-        <div class="info-cell" aria-label="Time Remaining">
+        <div class="info-cell" id="durationCell" tabIndex="0" role="text">
             <span>Duration</span>
             <strong id="durationDisplay">Manual</strong>
         </div>
@@ -56,7 +60,7 @@
     <div id="instructionRegion" aria-live="assertive" class="sr-only"></div>
 
     <div class="select-row">
-        <select id="workoutSelect">
+        <select id="workoutSelect" aria-label="Select workout file">
             <option value="manual">Manual Mode</option>
         </select>
         <button id="loadWorkoutBtn">Confirm</button>
@@ -81,40 +85,68 @@
         let segmentSecondsRemaining = 0;
         let audioCtx = null;
 
-        // Restore Audio Logic from Beech 7
         function initAudio() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
         }
 
         function playPip(isCountdown = false) {
-            if (!audioCtx) return;
+            if (!audioCtx || audioCtx.state !== 'running') return;
             if (!beepEnabled && !isCountdown) return;
+
             const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.frequency.setValueAtTime(isCountdown ? 1200 : 880, audioCtx.currentTime); 
-            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            osc.frequency.value = isCountdown ? 1200 : 880;
+            gainNode.gain.value = 0.1;
             osc.start();
-            osc.stop(audioCtx.currentTime + 0.1);
+            setTimeout(() => { osc.stop(); osc.disconnect(); }, 100);
+        }
+
+        function playEndFanfare() {
+            if (!audioCtx || audioCtx.state !== 'running') return;
+            let count = 0;
+            const fanfareInterval = setInterval(() => {
+                const osc = audioCtx.createOscillator();
+                osc.connect(audioCtx.destination);
+                osc.frequency.value = 440; // Lower pitch
+                osc.start();
+                setTimeout(() => { osc.stop(); }, 80);
+                count++;
+                if (count >= 6) clearInterval(fanfareInterval);
+            }, 150);
         }
 
         function formatDurationText(mins) {
-            if (mins < 1) return Math.round(mins * 60) + "s";
-            return mins + "m";
+            if (mins < 1) {
+                const secs = Math.round(mins * 60);
+                return secs + " secs";
+            }
+            return mins + " mins";
+        }
+
+        function updateAriaLabels() {
+            const wattsText = document.getElementById('targetWattsDisplay').textContent;
+            const durText = document.getElementById('durationDisplay').textContent;
+            document.getElementById('wattsCell').setAttribute('aria-label', `Target: ${wattsText}`);
+            document.getElementById('durationCell').setAttribute('aria-label', `Duration: ${durText}`);
+            document.getElementById('clockContainer').setAttribute('aria-label', `Clock: ${document.getElementById('timerDisplay').textContent}`);
         }
 
         async function sendPower(watts, durationMins = null) {
             targetWatts = parseInt(watts);
             document.getElementById('targetWattsDisplay').textContent = targetWatts + "W";
-            const durText = document.getElementById('durationDisplay');
+            const durDisplay = document.getElementById('durationDisplay');
+            
             if (durationMins !== null && workoutQueue.length > 0) {
-                durText.textContent = formatDurationText(durationMins);
+                durDisplay.textContent = formatDurationText(durationMins);
             } else {
-                durText.textContent = "Manual";
+                durDisplay.textContent = "Manual";
             }
+            updateAriaLabels();
+
             if (!controlChar) return;
             try {
                 const data = new Uint8Array([0x42, targetWatts & 0xFF, (targetWatts >> 8) & 0xFF]);
@@ -124,37 +156,40 @@
 
         function parseWorkout(text) {
             const lines = text.split('\n');
-            let parsed = [];
-            let loopItems = [];
+            let finalQueue = [];
+            let currentLoop = [];
             let inLoop = false;
-            let loopReps = 1;
+            let reps = 1;
+
             lines.forEach(line => {
                 const clean = line.trim();
-                if (!clean || clean.startsWith('#') || clean.toLowerCase().startsWith('name:')) return;
-                if (clean.startsWith('StartLoop')) {
+                if (!clean || clean.startsWith('#')) return;
+
+                if (clean.toLowerCase().startsWith('startloop')) {
                     inLoop = true;
                     const parts = clean.split(',');
-                    loopReps = parts.length > 1 ? parseInt(parts[1]) : 1;
-                    loopItems = [];
-                    return;
-                }
-                if (clean === 'EndLoop') {
+                    reps = parts.length > 1 ? parseInt(parts[1]) : 1;
+                    currentLoop = [];
+                } else if (clean.toLowerCase().startsWith('endloop')) {
                     inLoop = false;
-                    for(let r=0; r < loopReps; r++) {
-                        parsed = parsed.concat(JSON.parse(JSON.stringify(loopItems)));
+                    for (let i = 0; i < reps; i++) {
+                        // Deep copy the loop items into the final queue
+                        finalQueue = finalQueue.concat(JSON.parse(JSON.stringify(currentLoop)));
                     }
-                    return;
-                }
-                const parts = clean.split(',');
-                if (parts.length === 2) {
-                    const w = parseInt(parts[0]);
-                    const d = parseFloat(parts[1]);
-                    if (!isNaN(w) && !isNaN(d)) {
-                        parsed.push({ w, d: Math.round(d * 60), dm: d });
+                } else {
+                    const parts = clean.split(',');
+                    if (parts.length === 2) {
+                        const w = parseInt(parts[0]);
+                        const d = parseFloat(parts[1]);
+                        if (!isNaN(w) && !isNaN(d)) {
+                            const item = { w: w, d: Math.round(d * 60), dm: d };
+                            if (inLoop) currentLoop.push(item);
+                            else finalQueue.push(item);
+                        }
                     }
                 }
             });
-            return parsed;
+            return finalQueue;
         }
 
         function nextSegment() {
@@ -162,12 +197,14 @@
             if (currentSegmentIndex < workoutQueue.length) {
                 const seg = workoutQueue[currentSegmentIndex];
                 segmentSecondsRemaining = seg.d;
-                document.getElementById('instructionRegion').textContent = `Set to ${seg.w} Watts`;
+                document.getElementById('instructionRegion').textContent = `New Target: ${seg.w} Watts`;
                 sendPower(seg.w, seg.dm);
             } else {
                 isPaused = true;
                 clearInterval(timerInterval);
                 document.getElementById('startPauseButton').textContent = "Start";
+                playEndFanfare();
+                document.getElementById('instructionRegion').textContent = "Workout Finished";
             }
         }
 
@@ -179,10 +216,17 @@
                 secondsElapsed++;
                 const mins = Math.floor(secondsElapsed / 60);
                 const secs = secondsElapsed % 60;
-                document.getElementById('timerDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+                const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+                document.getElementById('timerDisplay').textContent = timeStr;
+                document.getElementById('clockContainer').setAttribute('aria-label', `Clock: ${timeStr}`);
+                
                 if (workoutQueue.length > 0) {
                     segmentSecondsRemaining--;
-                    if (segmentSecondsRemaining <= 3 && segmentSecondsRemaining > 0) playPip(true);
+                    // Check if it's the final 3 seconds of the WHOLE workout
+                    const isLastSegment = currentSegmentIndex === workoutQueue.length - 1;
+                    if (segmentSecondsRemaining <= 3 && segmentSecondsRemaining > 0) {
+                        if (!isLastSegment) playPip(true); // Normal transition pips
+                    }
                     if (segmentSecondsRemaining <= 0) nextSegment();
                 } else if (beepEnabled) {
                     playPip();
@@ -190,7 +234,25 @@
             }, 1000);
         }
 
+        document.getElementById('connectButton').addEventListener('click', async () => {
+            initAudio();
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: "KICKR" }], optionalServices: [SERVICE_UUID]
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
+                await controlChar.startNotifications();
+                await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
+                document.getElementById('status').textContent = "Beech 14: Connected";
+                sendPower(targetWatts);
+                playPip(true); 
+            } catch (e) { document.getElementById('status').textContent = "Beech 14: Error"; }
+        });
+
         document.getElementById('startPauseButton').addEventListener('click', () => {
+            initAudio();
             if (!isPaused) {
                 isPaused = true;
                 clearInterval(timerInterval);
@@ -210,10 +272,10 @@
         });
 
         document.getElementById('beepToggleButton').addEventListener('click', () => {
+            initAudio();
             beepEnabled = !beepEnabled;
             const btn = document.getElementById('beepToggleButton');
             btn.textContent = beepEnabled ? "Beeps On" : "Beeps Off";
-            btn.setAttribute('aria-label', btn.textContent);
             if (beepEnabled) playPip();
         });
 
@@ -232,9 +294,9 @@
                 currentSegmentIndex = -1;
                 if (workoutQueue.length > 0) {
                     sendPower(workoutQueue[0].w, workoutQueue[0].dm);
-                    document.getElementById('status').textContent = "Beech 12: Ready";
+                    document.getElementById('status').textContent = "Beech 14: Ready";
                 }
-            } catch (e) { document.getElementById('status').textContent = "Beech 12: Error"; }
+            } catch (e) { document.getElementById('status').textContent = "Beech 14: Error"; }
         });
 
         async function scanGitHub() {
@@ -255,21 +317,7 @@
         document.getElementById('increaseButton').addEventListener('click', () => sendPower(targetWatts + 10));
         document.getElementById('decreaseButton').addEventListener('click', () => sendPower(targetWatts - 10));
 
-        document.getElementById('connectButton').addEventListener('click', async () => {
-            try {
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ namePrefix: "KICKR" }], optionalServices: [SERVICE_UUID]
-                });
-                const server = await device.gatt.connect();
-                const service = await server.getPrimaryService(SERVICE_UUID);
-                controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
-                await controlChar.startNotifications();
-                await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
-                document.getElementById('status').textContent = "Beech 12: Connected";
-                sendPower(targetWatts);
-            } catch (e) { document.getElementById('status').textContent = "Beech 12: Error"; }
-        });
-
+        updateAriaLabels();
         scanGitHub();
     </script>
 </body>
