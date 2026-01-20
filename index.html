@@ -6,29 +6,18 @@
     <title>KICKR Beech 11</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 10px; max-width: 500px; margin: auto; background: #fff; }
-        
-        /* Top Row: Connect and Status */
         .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         #connectButton { flex: 2; padding: 15px; font-size: 1.1rem; border-radius: 12px; border: 3px solid #000; font-weight: bold; }
         #status { flex: 1; text-align: right; font-weight: bold; margin: 0; padding-right: 5px; }
-
-        /* Timer: Single block to fix double-swipe issue */
         .timer-display { width: 100%; font-size: 4rem; text-align: center; margin-bottom: 10px; padding: 20px 0; border: 3px solid #333; border-radius: 15px; display: block; }
-
-        /* Controls Row */
         .button-row { display: flex; gap: 10px; margin-bottom: 10px; }
         .button-row button { flex: 1; padding: 30px 5px; font-size: 1.4rem; border-radius: 15px; border: 3px solid #000; font-weight: bold; background: #f8f8f8; }
-
-        /* Power & Duration: Two distinct side-by-side cells */
         .info-grid { display: flex; gap: 10px; margin-bottom: 10px; }
         .info-cell { flex: 1; border: 3px solid #333; border-radius: 15px; padding: 25px 5px; text-align: center; font-size: 1.8rem; font-weight: bold; min-height: 60px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
         .info-cell span { font-size: 1rem; color: #444; text-transform: uppercase; margin-bottom: 5px; }
-
-        /* Manual Mode / Select Row */
         .select-row { display: flex; gap: 10px; margin-top: 20px; }
         select { flex: 2; padding: 15px; border-radius: 12px; border: 2px solid #000; font-size: 1rem; }
         #loadWorkoutBtn { flex: 1; padding: 15px; border-radius: 12px; border: 2px solid #000; font-size: 1rem; font-weight: bold; }
-
         .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
     </style>
 </head>
@@ -72,8 +61,9 @@
     </div>
 
     <script>
-        const GITHUB_USER = 'YOUR_USERNAME'; 
-        const GITHUB_REPO = 'YOUR_REPO_NAME';
+        // FIXED GITHUB CONFIGURATION
+        const GITHUB_USER = 'Chessel85'; 
+        const GITHUB_REPO = 'WahooKickrServer';
 
         let controlChar = null;
         const SERVICE_UUID = '00001818-0000-1000-8000-00805f9b34fb';
@@ -120,13 +110,10 @@
         async function sendPower(watts, durationMins = null) {
             targetWatts = parseInt(watts);
             document.getElementById('targetWattsDisplay').textContent = targetWatts + "W";
-            
-            const durCell = document.getElementById('durationCell');
             const durText = document.getElementById('durationDisplay');
             
             if (durationMins !== null && workoutQueue.length > 0) {
                 durText.textContent = formatDurationText(durationMins);
-                durCell.style.visibility = "visible";
             } else {
                 durText.textContent = "Manual";
             }
@@ -272,6 +259,7 @@
         document.getElementById('decreaseButton').addEventListener('click', () => sendPower(targetWatts - 10));
 
         document.getElementById('connectButton').addEventListener('click', async () => {
+            initAudio();
             try {
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ namePrefix: "KICKR" }], optionalServices: [SERVICE_UUID]
