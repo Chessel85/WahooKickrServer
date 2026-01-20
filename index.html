@@ -3,43 +3,60 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Beech 10</title>
+    <title>KICKR Beech 11</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 10px; max-width: 500px; margin: auto; background: #fff; }
-        .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 10px; }
-        #connectButton { flex: 2; padding: 15px; font-size: 1.1rem; border-radius: 12px; border: 3px solid #000; background: #f8f8f8; font-weight: bold; }
-        #status { flex: 1; text-align: right; font-weight: bold; font-size: 0.9rem; color: #555; margin: 0; }
-        button { width: 100%; padding: 30px 10px; font-size: 1.5rem; border-radius: 15px; border: 3px solid #000; background: #f8f8f8; color: black; font-weight: bold; }
-        button:disabled { opacity: 0.5; }
-        .timer-display { width: 100%; font-size: 4rem; text-align: center; margin-bottom: 10px; padding: 15px 0; border: 3px solid #333; border-radius: 15px; }
-        .button-row { display: flex; gap: 15px; width: 100%; margin-bottom: 15px; }
-        .button-row button { flex: 1; }
-        .power-display { font-size: 2.2rem; text-align: center; margin-bottom: 15px; padding: 25px 5px; border: 3px solid #333; border-radius: 15px; background: #fff; line-height: 1.2; }
-        .duration-subtext { font-size: 1.4rem; display: block; color: #444; margin-top: 5px; }
+        
+        /* Top Row: Connect and Status */
+        .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        #connectButton { flex: 2; padding: 15px; font-size: 1.1rem; border-radius: 12px; border: 3px solid #000; font-weight: bold; }
+        #status { flex: 1; text-align: right; font-weight: bold; margin: 0; padding-right: 5px; }
+
+        /* Timer: Single block to fix double-swipe issue */
+        .timer-display { width: 100%; font-size: 4rem; text-align: center; margin-bottom: 10px; padding: 20px 0; border: 3px solid #333; border-radius: 15px; display: block; }
+
+        /* Controls Row */
+        .button-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        .button-row button { flex: 1; padding: 30px 5px; font-size: 1.4rem; border-radius: 15px; border: 3px solid #000; font-weight: bold; background: #f8f8f8; }
+
+        /* Power & Duration: Two distinct side-by-side cells */
+        .info-grid { display: flex; gap: 10px; margin-bottom: 10px; }
+        .info-cell { flex: 1; border: 3px solid #333; border-radius: 15px; padding: 25px 5px; text-align: center; font-size: 1.8rem; font-weight: bold; min-height: 60px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+        .info-cell span { font-size: 1rem; color: #444; text-transform: uppercase; margin-bottom: 5px; }
+
+        /* Manual Mode / Select Row */
+        .select-row { display: flex; gap: 10px; margin-top: 20px; }
+        select { flex: 2; padding: 15px; border-radius: 12px; border: 2px solid #000; font-size: 1rem; }
+        #loadWorkoutBtn { flex: 1; padding: 15px; border-radius: 12px; border: 2px solid #000; font-size: 1rem; font-weight: bold; }
+
         .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
-        select { flex: 2; padding: 20px; font-size: 1.1rem; border-radius: 15px; border: 3px solid #000; }
-        #loadWorkoutBtn { flex: 1; background: #e0e0e0; padding: 10px; font-size: 1rem; }
     </style>
 </head>
 <body>
 
     <div class="top-row">
         <button id="connectButton">Connect KICKR</button>
-        <p id="status" role="status">Disconnected</p>
+        <div id="status" role="status" aria-live="polite">Disconnected</div>
     </div>
 
-    <div class="timer-display" role="timer" aria-label="Elapsed Time">
+    <div class="timer-display" id="timerContainer" tabIndex="0" role="timer" aria-label="Clock">
         <strong id="timerDisplay">0:00</strong>
     </div>
     
     <div class="button-row">
         <button id="startPauseButton">Start</button>
-        <button id="beepToggleButton" aria-pressed="false">Beep: OFF</button>
+        <button id="beepToggleButton" aria-label="Beeps Off">Beeps Off</button>
     </div>
 
-    <div class="power-display" id="powerRegion" aria-live="polite">
-        <strong id="targetWattsDisplay">Target 150W</strong>
-        <span id="durationDisplay" class="duration-subtext">Manual Mode</span>
+    <div class="info-grid">
+        <div class="info-cell" id="wattsCell" tabIndex="0">
+            <span>Target</span>
+            <strong id="targetWattsDisplay">150W</strong>
+        </div>
+        <div class="info-cell" id="durationCell" tabIndex="0">
+            <span>Duration</span>
+            <strong id="durationDisplay">Manual</strong>
+        </div>
     </div>
     
     <div class="button-row">
@@ -48,18 +65,15 @@
     </div>
 
     <div id="instructionRegion" aria-live="assertive" class="sr-only"></div>
-    <div id="beepStatusAnnouncer" aria-live="polite" class="sr-only"></div>
 
-    <div class="button-row" style="margin-top: 10px;">
-        <select id="workoutSelect" aria-label="Select Workout">
-            <option value="manual">Manual Mode</option>
-        </select>
+    <div class="select-row">
+        <select id="workoutSelect" aria-label="Select Workout"></select>
         <button id="loadWorkoutBtn">Confirm</button>
     </div>
 
     <script>
-        const GITHUB_USER = 'Chessel85'; 
-        const GITHUB_REPO = 'WahooKickrServer';
+        const GITHUB_USER = 'YOUR_USERNAME'; 
+        const GITHUB_REPO = 'YOUR_REPO_NAME';
 
         let controlChar = null;
         const SERVICE_UUID = '00001818-0000-1000-8000-00805f9b34fb';
@@ -77,38 +91,44 @@
         let audioCtx = null;
 
         function initAudio() {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
             if (audioCtx.state === 'suspended') audioCtx.resume();
         }
 
         function playPip(isCountdown = false) {
-            if (!audioCtx) return;
+            initAudio();
             if (!beepEnabled && !isCountdown) return;
+            
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.frequency.setValueAtTime(isCountdown ? 1200 : 880, audioCtx.currentTime); 
-            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
             osc.stop(audioCtx.currentTime + 0.1);
         }
 
-        function formatDuration(mins) {
-            if (mins < 1) {
-                return Math.round(mins * 60) + " seconds";
-            }
-            return mins + " mins";
+        function formatDurationText(mins) {
+            if (mins < 1) return Math.round(mins * 60) + "s";
+            return mins + "m";
         }
 
         async function sendPower(watts, durationMins = null) {
-            if (isNaN(watts)) return;
             targetWatts = parseInt(watts);
-            document.getElementById('targetWattsDisplay').textContent = "Target " + targetWatts + "W";
+            document.getElementById('targetWattsDisplay').textContent = targetWatts + "W";
             
-            if (durationMins !== null) {
-                document.getElementById('durationDisplay').textContent = "For " + formatDuration(durationMins);
+            const durCell = document.getElementById('durationCell');
+            const durText = document.getElementById('durationDisplay');
+            
+            if (durationMins !== null && workoutQueue.length > 0) {
+                durText.textContent = formatDurationText(durationMins);
+                durCell.style.visibility = "visible";
+            } else {
+                durText.textContent = "Manual";
             }
 
             if (!controlChar) return;
@@ -128,7 +148,6 @@
             lines.forEach(line => {
                 const clean = line.trim();
                 if (!clean || clean.startsWith('#') || clean.toLowerCase().startsWith('name:')) return;
-                
                 if (clean.startsWith('StartLoop')) {
                     inLoop = true;
                     const parts = clean.split(',');
@@ -143,14 +162,12 @@
                     }
                     return;
                 }
-
                 const parts = clean.split(',');
                 if (parts.length === 2) {
                     const w = parseInt(parts[0]);
-                    const d = parseFloat(parts[1]); // Decimal support
+                    const d = parseFloat(parts[1]);
                     if (!isNaN(w) && !isNaN(d)) {
-                        const item = { w: w, d: Math.round(d * 60), dm: d };
-                        if (inLoop) loopItems.push(item); else parsed.push(item);
+                        parsed.push({ w, d: Math.round(d * 60), dm: d });
                     }
                 }
             });
@@ -162,23 +179,18 @@
             if (currentSegmentIndex < workoutQueue.length) {
                 const seg = workoutQueue[currentSegmentIndex];
                 segmentSecondsRemaining = seg.d;
-                const durText = formatDuration(seg.dm);
-                document.getElementById('instructionRegion').textContent = `New segment: ${seg.w} Watts for ${durText}`;
+                document.getElementById('instructionRegion').textContent = `Power set to ${seg.w} Watts`;
                 sendPower(seg.w, seg.dm);
             } else {
                 isPaused = true;
                 clearInterval(timerInterval);
                 document.getElementById('startPauseButton').textContent = "Start";
-                document.getElementById('instructionRegion').textContent = "Workout Complete";
             }
         }
 
         function startTimerLogic() {
             isPaused = false;
-            document.getElementById('workoutSelect').disabled = true;
-            document.getElementById('loadWorkoutBtn').disabled = true;
             document.getElementById('startPauseButton').textContent = "Pause";
-            
             if (workoutQueue.length > 0 && currentSegmentIndex === -1) nextSegment();
 
             timerInterval = setInterval(() => {
@@ -217,6 +229,30 @@
             }
         });
 
+        document.getElementById('beepToggleButton').addEventListener('click', () => {
+            initAudio();
+            beepEnabled = !beepEnabled;
+            const btn = document.getElementById('beepToggleButton');
+            const stateText = beepEnabled ? "Beeps On" : "Beeps Off";
+            btn.textContent = stateText;
+            btn.setAttribute('aria-label', stateText);
+            if (beepEnabled) playPip();
+        });
+
+        document.getElementById('loadWorkoutBtn').addEventListener('click', async () => {
+            const fileName = document.getElementById('workoutSelect').value;
+            try {
+                const response = await fetch(fileName, {cache: "no-store"});
+                const text = await response.text();
+                workoutQueue = parseWorkout(text);
+                currentSegmentIndex = -1;
+                if (workoutQueue.length > 0) {
+                    sendPower(workoutQueue[0].w, workoutQueue[0].dm);
+                    document.getElementById('status').textContent = "Loaded";
+                }
+            } catch (e) { document.getElementById('status').textContent = "Error"; }
+        });
+
         async function scanGitHub() {
             const url = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/`;
             try {
@@ -229,37 +265,8 @@
                     opt.value = f.name; opt.textContent = f.name;
                     sel.appendChild(opt);
                 });
-            } catch (e) { document.getElementById('status').textContent = "Scan Error"; }
+            } catch (e) { }
         }
-
-        document.getElementById('loadWorkoutBtn').addEventListener('click', async () => {
-            const fileName = document.getElementById('workoutSelect').value;
-            if (fileName === "manual") { 
-                workoutQueue = []; 
-                document.getElementById('durationDisplay').textContent = "Manual Mode";
-                return; 
-            }
-            try {
-                const response = await fetch(fileName, {cache: "no-store"});
-                const text = await response.text();
-                workoutQueue = parseWorkout(text);
-                currentSegmentIndex = -1;
-                if (workoutQueue.length > 0) {
-                    sendPower(workoutQueue[0].w, workoutQueue[0].dm);
-                    document.getElementById('status').textContent = "Ready";
-                }
-            } catch (e) { document.getElementById('status').textContent = "Load Error"; }
-        } );
-
-        document.getElementById('beepToggleButton').addEventListener('click', () => {
-            initAudio();
-            beepEnabled = !beepEnabled;
-            const stateText = beepEnabled ? "ON" : "OFF";
-            document.getElementById('beepToggleButton').textContent = "Beep: " + stateText;
-            document.getElementById('beepToggleButton').setAttribute('aria-pressed', beepEnabled);
-            document.getElementById('beepStatusAnnouncer').textContent = "Beeps are now " + stateText;
-            if (beepEnabled) playPip();
-        });
 
         document.getElementById('increaseButton').addEventListener('click', () => sendPower(targetWatts + 10));
         document.getElementById('decreaseButton').addEventListener('click', () => sendPower(targetWatts - 10));
