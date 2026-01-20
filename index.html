@@ -3,137 +3,171 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Control - Redstart</title>
+    <title>KICKR Acorn</title>
+    <style>
+        body { font-family: system-ui, sans-serif; padding: 20px; max-width: 400px; margin: auto; }
+        button { width: 100%; padding: 20px; margin: 10px 0; font-size: 1.2rem; border-radius: 10px; border: 2px solid #000; background: #f0f0f0; }
+        .data-display { font-size: 1.5rem; text-align: center; margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        #debugLog { background: #000; color: #0f0; font-family: monospace; font-size: 10px; height: 100px; overflow-y: scroll; padding: 10px; margin-top: 20px; }
+        .hidden { display: none; }
+    </style>
 </head>
 <body>
-    <h1>Wahoo KICKR Dashboard</h1>
-    <p style="font-size: 0.8em; color: gray;">Version: Redstart</p>
-    
-    <button id="connectButton">Scan for KICKR</button>
-    <p id="status">Status: Disconnected</p>
-    
-    <p>Target Power: <span id="targetWatts">100</span>W</p>
-    <button id="decreaseButton">- 10W</button>
-    <button id="increaseButton">+ 10W</button>
-    
-    <p id="currentPower">Current: -- W</p>
 
-    <div id="debugLog" style="background: #000; color: #0f0; border: 1px solid #333; padding: 10px; margin-top: 20px; font-family: monospace; font-size: 11px; height: 200px; overflow-y: scroll;">
-        [Redstart Ready] Waiting for user...<br>
+    <h1 id="mainTitle">KICKR Acorn</h1>
+
+    <button id="connectButton" aria-describedby="status">Connect to KICKR</button>
+    <p id="status" role="status">Status: Disconnected</p>
+
+    <hr aria-hidden="true">
+
+    <div class="data-display">
+        <span id="timerLabel">Time:</span>
+        <strong id="timerDisplay" aria-live="off">0:00</strong>
+    </div>
+    
+    <button id="startPauseButton">Start Session</button>
+    
+    <button id="beepToggleButton" aria-pressed="false">Beep: OFF</button>
+
+    <hr aria-hidden="true">
+
+    <div class="data-display">
+        <span>Target Power:</span>
+        <strong id="targetWattsDisplay" aria-live="polite">150</strong><strong>W</strong>
+    </div>
+    
+    <div style="display: flex; gap: 10px;">
+        <button id="decreaseButton" aria-label="Decrease Target 10 Watts">- 10W</button>
+        <button id="increaseButton" aria-label="Increase Target 10 Watts">+ 10W</button>
+    </div>
+
+    <div id="debugLog" role="log" aria-label="System Logs">
+        [Acorn Ready] Test mode active.<br>
     </div>
 
     <script>
-const connectButton = document.getElementById('connectButton');
-const statusText = document.getElementById('status');
-const targetWattsSpan = document.getElementById('targetWatts');
-const currentPowerDisplay = document.getElementById('currentPower');
-const decreaseButton = document.getElementById('decreaseButton');
-const increaseButton = document.getElementById('increaseButton');
-const debugLog = document.getElementById('debugLog');
+        // Variables for KICKR
+        let controlChar = null;
+        const SERVICE_UUID = '00001818-0000-1000-8000-00805f9b34fb';
+        const CONTROL_CHAR_UUID = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
 
-function log(msg) {
-    const now = new Date();
-    const time = now.getHours() + ":" + now.getMinutes() + ":" + now.getSeconds();
-    debugLog.innerHTML += `[${time}] ${msg}<br>`;
-    debugLog.scrollTop = debugLog.scrollHeight;
-}
-
-// DEFINITIVE UUIDs FOR YOUR KICKR
-const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
-const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
-const WAHOO_TRAINER_CHAR = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
-
-let targetWatts = 100;
-let controlCharacteristic = null;
-
-async function sendPowerToKickr(watts) {
-    if (!controlCharacteristic) {
-        log("No control handle available.");
-        return;
-    }
-    try {
-        // Command 0x42 + watts in 16-bit little endian
-        const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
-        await controlCharacteristic.writeValueWithResponse(data);
-        log(`Sent Command: ${watts}W`);
-    } catch (error) {
-        log("Send Error: " + error.message);
-    }
-}
-
-decreaseButton.addEventListener('click', async () => {
-    targetWatts = Math.max(10, targetWatts - 10);
-    targetWattsSpan.textContent = targetWatts;
-    await sendPowerToKickr(targetWatts);
-});
-
-increaseButton.addEventListener('click', async () => {
-    targetWatts += 10;
-    targetWattsSpan.textContent = targetWatts;
-    await sendPowerToKickr(targetWatts);
-});
-
-connectButton.addEventListener('click', async () => {
-    try {
-        log("Requesting device (Filtered to 1818)...");
-        statusText.textContent = "Status: Searching...";
+        // Variables for Timer & UI
+        let targetWatts = 150;
+        let secondsElapsed = 0;
+        let timerInterval = null;
+        let isPaused = true;
         
-        const device = await navigator.bluetooth.requestDevice({
-            filters: [{
-                services: [CYCLING_POWER_SERVICE]
-            }]
-        });
-        
-        log("Selected: " + (device.name || "Unknown"));
-        statusText.textContent = "Status: Connecting...";
-        
-        const server = await device.gatt.connect();
-        log("GATT Connected.");
-        
-        log("Delaying 2.0s (Stabilizing)...");
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        log("Accessing Cycling Power Service...");
-        const powerService = await server.getPrimaryService(CYCLING_POWER_SERVICE);
-        
-        // 1. Setup Power Data
-        const powerChar = await powerService.getCharacteristic(POWER_MEASUREMENT_CHAR);
-        log("Starting Power Notifications...");
-        await powerChar.startNotifications();
-        powerChar.addEventListener('characteristicvaluechanged', (event) => {
-            const value = event.target.value;
-            const watts = value.getUint16(2, true);
-            currentPowerDisplay.textContent = `Current: ${watts}W`;
+        // Variables for Beep
+        let beepEnabled = false;
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function log(msg) {
+            const el = document.getElementById('debugLog');
+            el.innerHTML += msg + "<br>";
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function playPip() {
+            if (!beepEnabled) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // High pitch pip
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        function updateTimerDisplay() {
+            const mins = Math.floor(secondsElapsed / 60);
+            const secs = secondsElapsed % 60;
+            const timeString = `${mins}:${secs.toString().padStart(2, '0')}`;
+            document.getElementById('timerDisplay').textContent = timeString;
+            
+            // VoiceOver: Every 60 seconds, announce the time
+            if (secs === 0 && mins > 0) {
+                log("Time Check: " + mins + " minutes");
+            }
+        }
+
+        // Timer Logic
+        document.getElementById('startPauseButton').addEventListener('click', () => {
+            if (isPaused) {
+                // START
+                isPaused = false;
+                document.getElementById('startPauseButton').textContent = "Pause Session";
+                document.getElementById('startPauseButton').setAttribute('aria-label', "Pause Session");
+                timerInterval = setInterval(() => {
+                    secondsElapsed++;
+                    updateTimerDisplay();
+                    playPip();
+                }, 1000);
+                log("Session Started.");
+            } else {
+                // PAUSE
+                isPaused = true;
+                clearInterval(timerInterval);
+                document.getElementById('startPauseButton').textContent = "Start Session";
+                document.getElementById('startPauseButton').setAttribute('aria-label', "Resume Session");
+                log("Session Paused.");
+            }
         });
 
-        // 2. Setup Trainer Control (found in same service 1818)
-        log("Accessing Control Characteristic...");
-        controlCharacteristic = await powerService.getCharacteristic(WAHOO_TRAINER_CHAR);
-        
-        log("Starting Control Indications...");
-        await controlCharacteristic.startNotifications();
-        controlCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
-            log("Trainer Response: 0x" + event.target.value.getUint8(0).toString(16));
+        // Beep Toggle
+        document.getElementById('beepToggleButton').addEventListener('click', () => {
+            beepEnabled = !beepEnabled;
+            audioCtx.resume(); // Browser requirement to enable audio
+            document.getElementById('beepToggleButton').textContent = beepEnabled ? "Beep: ON" : "Beep: OFF";
+            document.getElementById('beepToggleButton').setAttribute('aria-pressed', beepEnabled);
         });
 
-        log("Delaying 1.0s (Pre-Unlock)...");
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Power Logic
+        async function sendPower(watts) {
+            if (!controlChar) return;
+            try {
+                const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
+                await controlChar.writeValueWithResponse(data);
+            } catch (e) { log("Ble Err: " + e.message); }
+        }
 
-        log("Sending Unlock [20 EE FC]...");
-        const unlockCmd = new Uint8Array([0x20, 0xEE, 0xFC]);
-        await controlCharacteristic.writeValueWithResponse(unlockCmd);
-        
-        log("Delaying 1.0s (Confirmation)...");
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        statusText.textContent = "Status: Ready!";
-        log("Logic complete. Ready for power adjustment.");
-        
-    } catch (error) {
-        log("ERROR: " + error.message);
-        statusText.textContent = "Status: Error - " + (error.message || "Unknown");
-    }
-});
+        document.getElementById('increaseButton').addEventListener('click', () => {
+            targetWatts += 10;
+            document.getElementById('targetWattsDisplay').textContent = targetWatts;
+            sendPower(targetWatts);
+        });
+
+        document.getElementById('decreaseButton').addEventListener('click', () => {
+            targetWatts = Math.max(10, targetWatts - 10);
+            document.getElementById('targetWattsDisplay').textContent = targetWatts;
+            sendPower(targetWatts);
+        });
+
+        // Connection Logic
+        document.getElementById('connectButton').addEventListener('click', async () => {
+            try {
+                log("Searching...");
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: "KICKR" }],
+                    optionalServices: [SERVICE_UUID]
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
+                
+                await controlChar.startNotifications();
+                await new Promise(r => setTimeout(r, 1000));
+                await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
+                
+                document.getElementById('status').textContent = "Status: Connected to " + device.name;
+                log("KICKR Connected & Unlocked.");
+            } catch (e) {
+                log("Error: " + e.message);
+            }
+        });
     </script>
 </body>
 </html>
