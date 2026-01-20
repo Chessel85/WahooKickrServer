@@ -3,22 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Beech 5</title>
+    <title>KICKR Beech 6</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 10px; max-width: 500px; margin: auto; background: #fff; }
         button { width: 100%; padding: 35px 10px; font-size: 1.5rem; border-radius: 15px; border: 3px solid #000; background: #f8f8f8; color: black; font-weight: bold; }
         button:disabled { opacity: 0.5; }
-        
         .timer-display { width: 100%; font-size: 4rem; text-align: center; margin-bottom: 10px; padding: 20px 0; border: 3px solid #333; border-radius: 15px; }
         .button-row { display: flex; gap: 15px; width: 100%; margin-bottom: 15px; }
         .button-row button { flex: 1; }
-
-        /* Power Display: Larger text, one phrase */
         .power-display { font-size: 2.5rem; text-align: center; margin-bottom: 15px; padding: 30px 0; border: 3px solid #333; border-radius: 15px; }
-        
-        /* Hidden instruction for VoiceOver only */
         .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
-
         select { flex: 2; padding: 25px; font-size: 1.2rem; border-radius: 15px; border: 3px solid #000; }
         #loadWorkoutBtn { flex: 1; background: #e0e0e0; }
     </style>
@@ -100,9 +94,8 @@
         async function sendPower(watts) {
             if (isNaN(watts)) return;
             targetWatts = watts;
-            const display = document.getElementById('targetWattsDisplay');
-            display.textContent = "Target " + watts + "W";
-            display.setAttribute('aria-label', "Target " + watts + " Watts");
+            document.getElementById('targetWattsDisplay').textContent = "Target " + watts + "W";
+            document.getElementById('targetWattsDisplay').setAttribute('aria-label', "Target " + watts + " Watts");
             if (!controlChar) return;
             try {
                 const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
@@ -118,7 +111,8 @@
             
             lines.forEach(line => {
                 const clean = line.trim();
-                if (!clean || clean.toLowerCase().startsWith('name:')) return;
+                // Skip comments, names, or empty lines
+                if (!clean || clean.startsWith('#') || clean.toLowerCase().startsWith('name:')) return;
                 
                 if (clean === 'StartLoop') { inLoop = true; return; }
                 if (clean === 'EndLoop') {
@@ -145,7 +139,6 @@
             if (currentSegmentIndex < workoutQueue.length) {
                 const seg = workoutQueue[currentSegmentIndex];
                 segmentSecondsRemaining = seg.d;
-                // Announce to VoiceOver only
                 document.getElementById('instructionRegion').textContent = `New segment, ${seg.w} Watts`;
                 sendPower(seg.w);
             } else {
@@ -162,6 +155,11 @@
             document.getElementById('loadWorkoutBtn').disabled = true;
             updateStartButtonLabel();
             
+            // If we have a workout loaded and haven't started segments yet
+            if (workoutQueue.length > 0 && currentSegmentIndex === -1) {
+                nextSegment();
+            }
+
             timerInterval = setInterval(() => {
                 secondsElapsed++;
                 const mins = Math.floor(secondsElapsed / 60);
@@ -224,8 +222,13 @@
                 const response = await fetch(fileName);
                 const text = await response.text();
                 workoutQueue = parseWorkout(text);
-                currentSegmentIndex = -1;
-                document.getElementById('status').textContent = "Loaded: " + fileName;
+                currentSegmentIndex = -1; // Ready to start first segment
+                
+                // NEW: Update display immediately with the first segment's power
+                if (workoutQueue.length > 0) {
+                    sendPower(workoutQueue[0].w);
+                    document.getElementById('status').textContent = "Ready: " + fileName;
+                }
             } catch (e) { document.getElementById('status').textContent = "Load Error"; }
         });
 
