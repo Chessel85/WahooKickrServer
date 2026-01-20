@@ -6,60 +6,54 @@
     <title>KICKR Acorn</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 20px; max-width: 400px; margin: auto; }
-        button { width: 100%; padding: 20px; margin: 10px 0; font-size: 1.2rem; border-radius: 10px; border: 2px solid #000; background: #f0f0f0; }
-        .data-display { font-size: 1.5rem; text-align: center; margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        button { width: 100%; padding: 25px; margin: 10px 0; font-size: 1.4rem; border-radius: 12px; border: 2px solid #000; background: #f8f8f8; color: black; }
+        .data-display { font-size: 1.8rem; text-align: center; margin: 20px 0; padding: 20px; border: 2px solid #333; border-radius: 12px; }
         #debugLog { background: #000; color: #0f0; font-family: monospace; font-size: 10px; height: 100px; overflow-y: scroll; padding: 10px; margin-top: 20px; }
-        .hidden { display: none; }
     </style>
 </head>
 <body>
 
     <h1 id="mainTitle">KICKR Acorn</h1>
 
-    <button id="connectButton" aria-describedby="status">Connect to KICKR</button>
+    <button id="connectButton">Connect to KICKR</button>
     <p id="status" role="status">Status: Disconnected</p>
 
-    <hr aria-hidden="true">
+    <hr>
 
-    <div class="data-display">
-        <span id="timerLabel">Time:</span>
-        <strong id="timerDisplay" aria-live="off">0:00</strong>
+    <div class="data-display" role="timer" aria-label="Elapsed Time">
+        <strong id="timerDisplay">0:00</strong>
     </div>
     
     <button id="startPauseButton">Start Session</button>
-    
     <button id="beepToggleButton" aria-pressed="false">Beep: OFF</button>
 
-    <hr aria-hidden="true">
+    <hr>
 
-    <div class="data-display">
-        <span>Target Power:</span>
-        <strong id="targetWattsDisplay" aria-live="polite">150</strong><strong>W</strong>
+    <div class="data-display" id="powerRegion" aria-live="assertive">
+        <span>Target:</span>
+        <strong id="targetWattsDisplay" aria-label="150 Watts">150W</strong>
     </div>
     
-    <div style="display: flex; gap: 10px;">
-        <button id="decreaseButton" aria-label="Decrease Target 10 Watts">- 10W</button>
-        <button id="increaseButton" aria-label="Increase Target 10 Watts">+ 10W</button>
+    <div style="display: flex; gap: 15px;">
+        <button id="decreaseButton" aria-label="Decrease Power">- 10W</button>
+        <button id="increaseButton" aria-label="Increase Power">+ 10W</button>
     </div>
 
     <div id="debugLog" role="log" aria-label="System Logs">
-        [Acorn Ready] Test mode active.<br>
+        [Acorn 1.1 Ready]<br>
     </div>
 
     <script>
-        // Variables for KICKR
         let controlChar = null;
         const SERVICE_UUID = '00001818-0000-1000-8000-00805f9b34fb';
         const CONTROL_CHAR_UUID = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
 
-        // Variables for Timer & UI
         let targetWatts = 150;
         let secondsElapsed = 0;
         let timerInterval = null;
         let isPaused = true;
-        
-        // Variables for Beep
         let beepEnabled = false;
+        
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
         function log(msg) {
@@ -72,8 +66,7 @@
             if (!beepEnabled) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.type = "sine";
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // High pitch pip
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime); 
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
             osc.connect(gain);
@@ -82,74 +75,61 @@
             osc.stop(audioCtx.currentTime + 0.1);
         }
 
-        function updateTimerDisplay() {
-            const mins = Math.floor(secondsElapsed / 60);
-            const secs = secondsElapsed % 60;
-            const timeString = `${mins}:${secs.toString().padStart(2, '0')}`;
-            document.getElementById('timerDisplay').textContent = timeString;
-            
-            // VoiceOver: Every 60 seconds, announce the time
-            if (secs === 0 && mins > 0) {
-                log("Time Check: " + mins + " minutes");
-            }
+        function updatePowerUI() {
+            const display = document.getElementById('targetWattsDisplay');
+            // This ensures VoiceOver reads "X Watts" as a single unit
+            display.textContent = targetWatts + "W";
+            display.setAttribute('aria-label', targetWatts + " Watts");
         }
 
-        // Timer Logic
         document.getElementById('startPauseButton').addEventListener('click', () => {
             if (isPaused) {
-                // START
                 isPaused = false;
+                audioCtx.resume();
                 document.getElementById('startPauseButton').textContent = "Pause Session";
-                document.getElementById('startPauseButton').setAttribute('aria-label', "Pause Session");
                 timerInterval = setInterval(() => {
                     secondsElapsed++;
-                    updateTimerDisplay();
+                    const mins = Math.floor(secondsElapsed / 60);
+                    const secs = secondsElapsed % 60;
+                    document.getElementById('timerDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
                     playPip();
                 }, 1000);
-                log("Session Started.");
             } else {
-                // PAUSE
                 isPaused = true;
                 clearInterval(timerInterval);
                 document.getElementById('startPauseButton').textContent = "Start Session";
-                document.getElementById('startPauseButton').setAttribute('aria-label', "Resume Session");
-                log("Session Paused.");
             }
         });
 
-        // Beep Toggle
         document.getElementById('beepToggleButton').addEventListener('click', () => {
             beepEnabled = !beepEnabled;
-            audioCtx.resume(); // Browser requirement to enable audio
+            audioCtx.resume();
             document.getElementById('beepToggleButton').textContent = beepEnabled ? "Beep: ON" : "Beep: OFF";
             document.getElementById('beepToggleButton').setAttribute('aria-pressed', beepEnabled);
         });
 
-        // Power Logic
         async function sendPower(watts) {
             if (!controlChar) return;
             try {
                 const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
                 await controlChar.writeValueWithResponse(data);
-            } catch (e) { log("Ble Err: " + e.message); }
+            } catch (e) { log("Err: " + e.message); }
         }
 
         document.getElementById('increaseButton').addEventListener('click', () => {
             targetWatts += 10;
-            document.getElementById('targetWattsDisplay').textContent = targetWatts;
+            updatePowerUI();
             sendPower(targetWatts);
         });
 
         document.getElementById('decreaseButton').addEventListener('click', () => {
             targetWatts = Math.max(10, targetWatts - 10);
-            document.getElementById('targetWattsDisplay').textContent = targetWatts;
+            updatePowerUI();
             sendPower(targetWatts);
         });
 
-        // Connection Logic
         document.getElementById('connectButton').addEventListener('click', async () => {
             try {
-                log("Searching...");
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ namePrefix: "KICKR" }],
                     optionalServices: [SERVICE_UUID]
@@ -157,16 +137,12 @@
                 const server = await device.gatt.connect();
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
-                
                 await controlChar.startNotifications();
                 await new Promise(r => setTimeout(r, 1000));
                 await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
-                
-                document.getElementById('status').textContent = "Status: Connected to " + device.name;
-                log("KICKR Connected & Unlocked.");
-            } catch (e) {
-                log("Error: " + e.message);
-            }
+                document.getElementById('status').textContent = "Status: Connected";
+                log("Unlocked.");
+            } catch (e) { log("Error: " + e.message); }
         });
     </script>
 </body>
