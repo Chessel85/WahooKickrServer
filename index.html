@@ -3,22 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Acorn</title>
+    <title>KICKR Acorn3</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 20px; max-width: 400px; margin: auto; }
         button { width: 100%; padding: 25px; margin: 10px 0; font-size: 1.4rem; border-radius: 12px; border: 2px solid #000; background: #f8f8f8; color: black; }
-        .data-display { font-size: 1.8rem; text-align: center; margin: 20px 0; padding: 20px; border: 2px solid #333; border-radius: 12px; }
-        #debugLog { background: #000; color: #0f0; font-family: monospace; font-size: 10px; height: 100px; overflow-y: scroll; padding: 10px; margin-top: 20px; }
+        .data-display { font-size: 1.8rem; text-align: center; margin: 15px 0; padding: 20px; border: 2px solid #333; border-radius: 12px; }
+        #debugLog { background: #000; color: #0f0; font-family: monospace; font-size: 10px; height: 80px; overflow-y: scroll; padding: 10px; margin-top: 20px; }
     </style>
 </head>
 <body>
 
-    <h1 id="mainTitle">KICKR Acorn</h1>
+    <h1 id="mainTitle">KICKR Acorn3</h1>
 
     <button id="connectButton">Connect to KICKR</button>
     <p id="status" role="status">Status: Disconnected</p>
-
-    <hr>
 
     <div class="data-display" role="timer" aria-label="Elapsed Time">
         <strong id="timerDisplay">0:00</strong>
@@ -27,11 +25,8 @@
     <button id="startPauseButton">Start Session</button>
     <button id="beepToggleButton" aria-pressed="false">Beep: OFF</button>
 
-    <hr>
-
-    <div class="data-display" id="powerRegion" aria-live="assertive">
-        <span>Target:</span>
-        <strong id="targetWattsDisplay" aria-label="150 Watts">150W</strong>
+    <div class="data-display" id="powerRegion" aria-live="assertive" role="text">
+        <strong id="targetWattsDisplay" aria-label="Target 150 Watts">Target 150W</strong>
     </div>
     
     <div style="display: flex; gap: 15px;">
@@ -40,7 +35,7 @@
     </div>
 
     <div id="debugLog" role="log" aria-label="System Logs">
-        [Acorn 1.1 Ready]<br>
+        [Acorn3 Ready]<br>
     </div>
 
     <script>
@@ -77,9 +72,9 @@
 
         function updatePowerUI() {
             const display = document.getElementById('targetWattsDisplay');
-            // This ensures VoiceOver reads "X Watts" as a single unit
-            display.textContent = targetWatts + "W";
-            display.setAttribute('aria-label', targetWatts + " Watts");
+            // Merges "Target" and "Watts" for a single VoiceOver phrase
+            display.textContent = "Target " + targetWatts + "W";
+            display.setAttribute('aria-label', "Target " + targetWatts + " Watts");
         }
 
         document.getElementById('startPauseButton').addEventListener('click', () => {
