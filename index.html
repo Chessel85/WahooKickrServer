@@ -3,263 +3,122 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Beech 7</title>
+    <title>Spatula Debugger</title>
     <style>
-        body { font-family: system-ui, sans-serif; padding: 10px; max-width: 500px; margin: auto; background: #fff; }
-        button { width: 100%; padding: 35px 10px; font-size: 1.5rem; border-radius: 15px; border: 3px solid #000; background: #f8f8f8; color: black; font-weight: bold; }
-        button:disabled { opacity: 0.5; }
-        .timer-display { width: 100%; font-size: 4rem; text-align: center; margin-bottom: 10px; padding: 20px 0; border: 3px solid #333; border-radius: 15px; }
-        .button-row { display: flex; gap: 15px; width: 100%; margin-bottom: 15px; }
-        .button-row button { flex: 1; }
-        .power-display { font-size: 2.5rem; text-align: center; margin-bottom: 15px; padding: 30px 0; border: 3px solid #333; border-radius: 15px; }
-        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
-        select { flex: 2; padding: 25px; font-size: 1.2rem; border-radius: 15px; border: 3px solid #000; }
-        #loadWorkoutBtn { flex: 1; background: #e0e0e0; }
+        body { font-family: system-ui, sans-serif; padding: 20px; max-width: 600px; margin: auto; line-height: 1.5; }
+        .box { border: 3px solid #000; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+        button { width: 100%; padding: 20px; font-size: 1.2rem; font-weight: bold; cursor: pointer; background: #e0e0e0; }
+        select { width: 100%; padding: 15px; font-size: 1.2rem; margin-bottom: 10px; }
+        #output { background: #f4f4f4; padding: 15px; border-left: 5px solid #007bff; white-space: pre-wrap; font-family: monospace; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+        th { background: #eee; }
+        .error { color: red; font-weight: bold; border: 2px solid red; padding: 10px; }
     </style>
 </head>
 <body>
 
-    <h1 id="mainTitle">KICKR Beech 7</h1>
+    <h1>Spatula File Debugger</h1>
+    <p>Use this to confirm the server is serving your TS files correctly.</p>
 
-    <button id="connectButton">Connect to KICKR</button>
-    <p id="status" role="status" style="text-align: center; font-weight: bold;">Status: Disconnected</p>
-
-    <div class="timer-display" role="timer" aria-label="Elapsed Time">
-        <strong id="timerDisplay">0:00</strong>
-    </div>
-    
-    <div class="button-row">
-        <button id="startPauseButton">Start</button>
-        <button id="beepToggleButton" aria-pressed="false">Beep: OFF</button>
-    </div>
-
-    <div class="power-display" id="powerRegion" aria-live="assertive" role="text">
-        <strong id="targetWattsDisplay" aria-label="Target 150 Watts">Target 150W</strong>
-    </div>
-    
-    <div class="button-row">
-        <button id="decreaseButton" aria-label="Decrease Power">- 10W</button>
-        <button id="increaseButton" aria-label="Increase Power">+ 10W</button>
-    </div>
-
-    <div id="instructionRegion" aria-live="assertive" class="sr-only"></div>
-
-    <div class="button-row" style="margin-top: 20px;">
-        <select id="workoutSelect" aria-label="Select Workout">
-            <option value="manual">Manual Mode</option>
+    <div class="box">
+        <label for="fileSelect"><strong>1. Select File:</strong></label>
+        <select id="fileSelect">
+            <option value="TS01.txt">TS01.txt</option>
+            <option value="TS02.txt">TS02.txt</option>
+            <option value="TS03.txt">TS03.txt</option>
         </select>
-        <button id="loadWorkoutBtn">Confirm</button>
+        <button id="readButton">Read and Interpret File</button>
+    </div>
+
+    <div id="errorDisplay" class="error" style="display:none;"></div>
+
+    <div id="interpretation" class="box" style="display:none;">
+        <h2>Interpretation Results</h2>
+        <div id="output"></div>
+        
+        <table id="resultTable">
+            <thead>
+                <tr>
+                    <th>Step</th>
+                    <th>Watts</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
     </div>
 
     <script>
-        let controlChar = null;
-        const SERVICE_UUID = '00001818-0000-1000-8000-00805f9b34fb';
-        const CONTROL_CHAR_UUID = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
+        document.getElementById('readButton').addEventListener('click', async () => {
+            const fileName = document.getElementById('fileSelect').value;
+            const output = document.getElementById('output');
+            const errorDisplay = document.getElementById('errorDisplay');
+            const tableBody = document.querySelector('#resultTable tbody');
+            const interpDiv = document.getElementById('interpretation');
 
-        let targetWatts = 150;
-        let secondsElapsed = 0;
-        let timerInterval = null;
-        let isPaused = true;
-        let beepEnabled = false;
-        
-        let workoutQueue = [];
-        let currentSegmentIndex = -1;
-        let segmentSecondsRemaining = 0;
-        let audioCtx = null;
+            // Reset UI
+            errorDisplay.style.display = 'none';
+            interpDiv.style.display = 'none';
+            tableBody.innerHTML = '';
+            output.textContent = "Fetching " + fileName + "...";
 
-        function initAudio() {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-        }
-
-        function playPip(isCountdown = false) {
-            if (!audioCtx) return;
-            if (!beepEnabled && !isCountdown) return;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.frequency.setValueAtTime(isCountdown ? 1200 : 880, audioCtx.currentTime); 
-            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.1);
-        }
-
-        function updateStartButtonLabel() {
-            const btn = document.getElementById('startPauseButton');
-            if (!isPaused) btn.textContent = "Pause";
-            else if (secondsElapsed > 0) btn.textContent = "Resume";
-            else btn.textContent = "Start";
-        }
-
-        async function sendPower(watts) {
-            if (isNaN(watts)) return;
-            targetWatts = parseInt(watts); // Force integer
-            document.getElementById('targetWattsDisplay').textContent = "Target " + targetWatts + "W";
-            document.getElementById('targetWattsDisplay').setAttribute('aria-label', "Target " + targetWatts + " Watts");
-            if (!controlChar) return;
             try {
-                const data = new Uint8Array([0x42, targetWatts & 0xFF, (targetWatts >> 8) & 0xFF]);
-                await controlChar.writeValueWithResponse(data);
-            } catch (e) { console.error("BLE Error"); }
-        }
-
-        function parseWorkout(text) {
-            const lines = text.split('\n');
-            let parsed = [];
-            let loopItems = [];
-            let inLoop = false;
-            
-            lines.forEach(line => {
-                const clean = line.trim();
-                if (!clean || clean.startsWith('#') || clean.toLowerCase().startsWith('name:')) return;
+                const response = await fetch(fileName, { cache: "no-store" });
                 
-                if (clean === 'StartLoop') { inLoop = true; return; }
-                if (clean === 'EndLoop') {
-                    inLoop = false;
-                    parsed = parsed.concat(loopItems);
-                    return;
+                if (!response.ok) {
+                    throw new Error(`Server returned ${response.status}: ${response.statusText}`);
                 }
 
-                const parts = clean.split(',');
-                if (parts.length === 2) {
-                    const w = parseInt(parts[0]);
-                    const d = parseInt(parts[1]);
-                    if (!isNaN(w) && !isNaN(d)) {
-                        const item = { w: w, d: d * 60 };
-                        if (inLoop) loopItems.push(item); else parsed.push(item);
-                    }
-                }
-            });
-            return parsed;
-        }
-
-        function nextSegment() {
-            currentSegmentIndex++;
-            if (currentSegmentIndex < workoutQueue.length) {
-                const seg = workoutQueue[currentSegmentIndex];
-                segmentSecondsRemaining = seg.d;
-                document.getElementById('instructionRegion').textContent = `New segment, ${seg.w} Watts`;
-                sendPower(seg.w);
-            } else {
-                isPaused = true;
-                clearInterval(timerInterval);
-                updateStartButtonLabel();
-                document.getElementById('instructionRegion').textContent = "Workout Complete";
-            }
-        }
-
-        function startTimerLogic() {
-            isPaused = false;
-            document.getElementById('workoutSelect').disabled = true;
-            document.getElementById('loadWorkoutBtn').disabled = true;
-            updateStartButtonLabel();
-            
-            // Critical: Ensure we advance into the first segment if a workout is loaded
-            if (workoutQueue.length > 0 && currentSegmentIndex === -1) {
-                nextSegment();
-            }
-
-            timerInterval = setInterval(() => {
-                secondsElapsed++;
-                const mins = Math.floor(secondsElapsed / 60);
-                const secs = secondsElapsed % 60;
-                document.getElementById('timerDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-                
-                if (workoutQueue.length > 0) {
-                    segmentSecondsRemaining--;
-                    if (segmentSecondsRemaining <= 3 && segmentSecondsRemaining > 0) playPip(true);
-                    if (segmentSecondsRemaining <= 0) nextSegment();
-                } else if (beepEnabled) {
-                    playPip();
-                }
-            }, 1000);
-        }
-
-        document.getElementById('startPauseButton').addEventListener('click', () => {
-            initAudio();
-            if (!isPaused) {
-                isPaused = true;
-                clearInterval(timerInterval);
-                updateStartButtonLabel();
-            } else {
-                if (secondsElapsed === 0) {
-                    let count = 3;
-                    const launcher = setInterval(() => {
-                        playPip(true);
-                        count--;
-                        if (count <= 0) {
-                            clearInterval(launcher);
-                            startTimerLogic();
-                        }
-                    }, 1000);
-                } else {
-                    startTimerLogic();
-                }
-            }
-        });
-
-        document.getElementById('beepToggleButton').addEventListener('click', () => {
-            initAudio();
-            beepEnabled = !beepEnabled;
-            document.getElementById('beepToggleButton').textContent = beepEnabled ? "Beep: ON" : "Beep: OFF";
-            document.getElementById('beepToggleButton').setAttribute('aria-pressed', beepEnabled);
-        });
-
-        const knownFiles = ["TS01.txt", "TS02.txt", "TS03.txt"]; 
-        const select = document.getElementById('workoutSelect');
-        knownFiles.forEach(file => {
-            let opt = document.createElement('option');
-            opt.value = file;
-            opt.textContent = file;
-            select.appendChild(opt);
-        });
-
-        document.getElementById('loadWorkoutBtn').addEventListener('click', async () => {
-            const fileName = document.getElementById('workoutSelect').value;
-            if (fileName === "manual") { 
-                workoutQueue = []; 
-                currentSegmentIndex = -1;
-                return; 
-            }
-            try {
-                const response = await fetch(fileName);
                 const text = await response.text();
-                const newQueue = parseWorkout(text);
-                
-                if (newQueue.length > 0) {
-                    workoutQueue = newQueue;
-                    currentSegmentIndex = -1;
-                    // FORCE UPDATE: Immediately push the first segment power to UI
-                    targetWatts = workoutQueue[0].w;
-                    sendPower(targetWatts);
-                    document.getElementById('status').textContent = "Ready: " + fileName;
-                }
-            } catch (e) { document.getElementById('status').textContent = "Load Error"; }
-        });
+                output.textContent = "RAW FILE CONTENT:\n---\n" + text + "\n---";
 
-        document.getElementById('increaseButton').addEventListener('click', () => sendPower(targetWatts + 10));
-        document.getElementById('decreaseButton').addEventListener('click', () => sendPower(targetWatts - 10));
+                // Parsing Logic
+                const lines = text.split('\n');
+                let parsedQueue = [];
+                let loopItems = [];
+                let inLoop = false;
 
-        document.getElementById('connectButton').addEventListener('click', async () => {
-            try {
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ namePrefix: "KICKR" }], optionalServices: [SERVICE_UUID]
+                lines.forEach((line, index) => {
+                    const clean = line.trim();
+                    if (!clean || clean.startsWith('#') || clean.toLowerCase().startsWith('name:')) return;
+
+                    if (clean === 'StartLoop') { inLoop = true; return; }
+                    if (clean === 'EndLoop') {
+                        inLoop = false;
+                        parsedQueue = parsedQueue.concat(loopItems);
+                        return;
+                    }
+
+                    const parts = clean.split(',');
+                    if (parts.length === 2) {
+                        const w = parseInt(parts[0]);
+                        const d = parseInt(parts[1]);
+                        if (!isNaN(w) && !isNaN(d)) {
+                            const item = { watts: w, mins: d };
+                            if (inLoop) loopItems.push(item);
+                            else parsedQueue.push(item);
+                        }
+                    }
                 });
-                const server = await device.gatt.connect();
-                const service = await server.getPrimaryService(SERVICE_UUID);
-                controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
-                await controlChar.startNotifications();
-                await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
-                document.getElementById('status').textContent = "Connected";
-                // Only send default power if no workout is loaded
-                if (currentSegmentIndex === -1 && workoutQueue.length === 0) {
-                    sendPower(150);
-                } else if (workoutQueue.length > 0) {
-                    sendPower(workoutQueue[0].w);
+
+                // Display in Table
+                if (parsedQueue.length > 0) {
+                    parsedQueue.forEach((item, i) => {
+                        const row = tableBody.insertRow();
+                        row.insertCell(0).textContent = i + 1;
+                        row.insertCell(1).textContent = item.watts + "W";
+                        row.insertCell(2).textContent = item.mins + " mins";
+                    });
+                    interpDiv.style.display = 'block';
+                } else {
+                    throw new Error("File read successfully, but no valid workout instructions (e.g., 150,5) were found.");
                 }
-            } catch (e) { document.getElementById('status').textContent = "Error"; }
+
+            } catch (err) {
+                errorDisplay.textContent = "ERROR: " + err.message;
+                errorDisplay.style.display = 'block';
+            }
         });
     </script>
 </body>
