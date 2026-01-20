@@ -3,134 +3,259 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spatula2 - GitHub Dynamic</title>
+    <title>KICKR Beech 8</title>
     <style>
-        body { font-family: system-ui, sans-serif; padding: 20px; max-width: 600px; margin: auto; }
-        .box { border: 3px solid #000; padding: 20px; border-radius: 12px; margin-bottom: 20px; background: #fff; }
-        button { width: 100%; padding: 20px; font-size: 1.2rem; font-weight: bold; background: #e0e0e0; border-radius: 10px; }
-        select { width: 100%; padding: 15px; font-size: 1.2rem; margin-bottom: 15px; border-radius: 8px; }
-        #rawContent { background: #eee; padding: 15px; font-family: monospace; white-space: pre-wrap; margin-top: 10px; border-left: 5px solid #333; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ccc; padding: 12px; text-align: left; }
-        th { background: #f0f0f0; }
-        .status-msg { font-weight: bold; color: #007bff; margin-bottom: 10px; }
+        body { font-family: system-ui, sans-serif; padding: 10px; max-width: 500px; margin: auto; background: #fff; }
+        h1 { font-size: 1.2rem; text-align: center; margin: 5px 0; }
+        button { width: 100%; padding: 30px 10px; font-size: 1.5rem; border-radius: 15px; border: 3px solid #000; background: #f8f8f8; color: black; font-weight: bold; }
+        button:disabled { opacity: 0.5; }
+        .timer-display { width: 100%; font-size: 4rem; text-align: center; margin-bottom: 10px; padding: 15px 0; border: 3px solid #333; border-radius: 15px; }
+        .button-row { display: flex; gap: 15px; width: 100%; margin-bottom: 15px; }
+        .button-row button { flex: 1; }
+        .power-display { font-size: 2.5rem; text-align: center; margin-bottom: 15px; padding: 25px 0; border: 3px solid #333; border-radius: 15px; background: #fff; }
+        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+        select { flex: 2; padding: 20px; font-size: 1.1rem; border-radius: 15px; border: 3px solid #000; }
+        #loadWorkoutBtn { flex: 1; background: #e0e0e0; padding: 10px; font-size: 1rem; }
     </style>
 </head>
 <body>
 
-    <h1>Spatula2 (GitHub Mode)</h1>
+    <h1>KICKR Beech 8</h1>
 
-    <div class="box">
-        <div id="scanStatus" class="status-msg" role="status">Initializing...</div>
-        <label for="fileSelect"><strong>Available Workouts:</strong></label>
-        <select id="fileSelect">
-            <option value="">-- Scanning GitHub --</option>
-        </select>
-        <button id="readButton">Read and Interpret</button>
+    <button id="connectButton">Connect to KICKR</button>
+    <p id="status" role="status" style="text-align: center; font-weight: bold; margin: 5px 0;">Status: Disconnected</p>
+
+    <div class="timer-display" role="timer" aria-label="Elapsed Time">
+        <strong id="timerDisplay">0:00</strong>
+    </div>
+    
+    <div class="button-row">
+        <button id="startPauseButton">Start</button>
+        <button id="beepToggleButton" aria-pressed="false">Beep: OFF</button>
     </div>
 
-    <div id="interpretation" class="box" style="display:none;">
-        <h3>Interpretation</h3>
-        <div id="rawContent"></div>
-        <table id="resultTable">
-            <thead>
-                <tr><th>Step</th><th>Watts</th><th>Duration</th></tr>
-            </thead>
-            <tbody></tbody>
-        </table>
+    <div class="power-display" id="powerRegion" aria-live="assertive">
+        <strong id="targetWattsDisplay">Target 150W</strong>
+    </div>
+    
+    <div class="button-row">
+        <button id="decreaseButton" aria-label="Decrease Power">- 10W</button>
+        <button id="increaseButton" aria-label="Increase Power">+ 10W</button>
+    </div>
+
+    <div id="instructionRegion" aria-live="assertive" class="sr-only"></div>
+
+    <div class="button-row" style="margin-top: 10px;">
+        <select id="workoutSelect" aria-label="Select Workout">
+            <option value="manual">Manual Mode</option>
+        </select>
+        <button id="loadWorkoutBtn">Confirm</button>
     </div>
 
     <script>
-        // CONFIGURATION: Set these to match your GitHub
-        const GITHUB_USER = 'Chessel85'; // e.g., 'johndoe'
-        const GITHUB_REPO = 'WahooKickrServer'; // e.g., 'kickr-app'
-        
-        const select = document.getElementById('fileSelect');
-        const status = document.getElementById('scanStatus');
+        // CONFIGURATION: Set these to your GitHub info
+        const GITHUB_USER = 'YOUR_USERNAME'; 
+        const GITHUB_REPO = 'YOUR_REPO_NAME';
 
-        // 1. SCAN GITHUB FOR TS FILES
-        async function scanFiles() {
-            const url = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/`;
+        let controlChar = null;
+        const SERVICE_UUID = '00001818-0000-1000-8000-00805f9b34fb';
+        const CONTROL_CHAR_UUID = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
+
+        let targetWatts = 150;
+        let secondsElapsed = 0;
+        let timerInterval = null;
+        let isPaused = true;
+        let beepEnabled = false;
+        
+        let workoutQueue = [];
+        let currentSegmentIndex = -1;
+        let segmentSecondsRemaining = 0;
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function playPip(isCountdown = false) {
+            if (!audioCtx) return;
+            if (!beepEnabled && !isCountdown) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.frequency.setValueAtTime(isCountdown ? 1200 : 880, audioCtx.currentTime); 
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        async function sendPower(watts) {
+            if (isNaN(watts)) return;
+            targetWatts = parseInt(watts);
+            document.getElementById('targetWattsDisplay').textContent = "Target " + targetWatts + "W";
+            if (!controlChar) return;
             try {
-                const response = await fetch(url);
-                const files = await response.ok ? await response.json() : [];
+                const data = new Uint8Array([0x42, targetWatts & 0xFF, (targetWatts >> 8) & 0xFF]);
+                await controlChar.writeValueWithResponse(data);
+            } catch (e) { console.error("BLE Error"); }
+        }
+
+        function parseWorkout(text) {
+            const lines = text.split('\n');
+            let parsed = [];
+            let loopItems = [];
+            let inLoop = false;
+            let loopReps = 1;
+
+            lines.forEach(line => {
+                const clean = line.trim();
+                if (!clean || clean.startsWith('#') || clean.toLowerCase().startsWith('name:')) return;
                 
-                // Filter files that start with TS and end with .txt
-                const tsFiles = files.filter(f => f.name.startsWith('TS') && f.name.endsWith('.txt'));
-                
-                select.innerHTML = ''; // Clear loading msg
-                if (tsFiles.length === 0) {
-                    status.textContent = "No TS*.txt files found in GitHub repo.";
-                    select.innerHTML = '<option>No files found</option>';
+                if (clean.startsWith('StartLoop')) {
+                    inLoop = true;
+                    const parts = clean.split(',');
+                    loopReps = parts.length > 1 ? parseInt(parts[1]) : 1;
+                    loopItems = [];
+                    return;
+                }
+                if (clean === 'EndLoop') {
+                    inLoop = false;
+                    for(let r=0; r < loopReps; r++) {
+                        parsed = parsed.concat(JSON.parse(JSON.stringify(loopItems)));
+                    }
                     return;
                 }
 
-                tsFiles.forEach(file => {
-                    let opt = document.createElement('option');
-                    opt.value = file.name;
-                    opt.textContent = file.name;
-                    select.appendChild(opt);
-                });
-                status.textContent = `Found ${tsFiles.length} workout files.`;
-            } catch (e) {
-                status.textContent = "Error scanning GitHub: " + e.message;
+                const parts = clean.split(',');
+                if (parts.length === 2) {
+                    const w = parseInt(parts[0]);
+                    const d = parseInt(parts[1]);
+                    if (!isNaN(w) && !isNaN(d)) {
+                        const item = { w: w, d: d * 60 };
+                        if (inLoop) loopItems.push(item); else parsed.push(item);
+                    }
+                }
+            });
+            return parsed;
+        }
+
+        function nextSegment() {
+            currentSegmentIndex++;
+            if (currentSegmentIndex < workoutQueue.length) {
+                const seg = workoutQueue[currentSegmentIndex];
+                segmentSecondsRemaining = seg.d;
+                document.getElementById('instructionRegion').textContent = `New segment, ${seg.w} Watts`;
+                sendPower(seg.w);
+            } else {
+                isPaused = true;
+                clearInterval(timerInterval);
+                document.getElementById('startPauseButton').textContent = "Start";
+                document.getElementById('instructionRegion').textContent = "Workout Complete";
             }
         }
 
-        // 2. READ AND PARSE
-        document.getElementById('readButton').addEventListener('click', async () => {
-            const fileName = select.value;
-            if (!fileName) return;
+        function startTimerLogic() {
+            isPaused = false;
+            document.getElementById('workoutSelect').disabled = true;
+            document.getElementById('loadWorkoutBtn').disabled = true;
+            document.getElementById('startPauseButton').textContent = "Pause";
+            
+            if (workoutQueue.length > 0 && currentSegmentIndex === -1) nextSegment();
 
-            try {
-                // Use cache: "no-store" so you can push updates to GitHub and see them quickly
-                const response = await fetch(fileName, { cache: "no-store" });
-                const text = await response.text();
+            timerInterval = setInterval(() => {
+                secondsElapsed++;
+                const mins = Math.floor(secondsElapsed / 60);
+                const secs = secondsElapsed % 60;
+                document.getElementById('timerDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
                 
-                document.getElementById('rawContent').textContent = text;
-                const tableBody = document.querySelector('#resultTable tbody');
-                tableBody.innerHTML = '';
+                if (workoutQueue.length > 0) {
+                    segmentSecondsRemaining--;
+                    if (segmentSecondsRemaining <= 3 && segmentSecondsRemaining > 0) playPip(true);
+                    if (segmentSecondsRemaining <= 0) nextSegment();
+                } else if (beepEnabled) {
+                    playPip();
+                }
+            }, 1000);
+        }
 
-                // PARSER LOGIC
-                const lines = text.split('\n');
-                let parsedQueue = [];
-                let loopItems = [];
-                let inLoop = false;
-
-                lines.forEach(line => {
-                    const clean = line.trim();
-                    if (!clean || clean.startsWith('#') || clean.toLowerCase().startsWith('name:')) return;
-                    if (clean === 'StartLoop') { inLoop = true; return; }
-                    if (clean === 'EndLoop') { inLoop = false; parsedQueue = parsedQueue.concat(loopItems); return; }
-
-                    const parts = clean.split(',');
-                    if (parts.length === 2) {
-                        const w = parseInt(parts[0]);
-                        const d = parseInt(parts[1]);
-                        if (!isNaN(w) && !isNaN(d)) {
-                            const item = { w, d };
-                            if (inLoop) loopItems.push(item);
-                            else parsedQueue.push(item);
-                        }
-                    }
-                });
-
-                parsedQueue.forEach((seg, i) => {
-                    const row = tableBody.insertRow();
-                    row.insertCell(0).textContent = i + 1;
-                    row.insertCell(1).textContent = seg.w + "W";
-                    row.insertCell(2).textContent = seg.d + " mins";
-                });
-
-                document.getElementById('interpretation').style.display = 'block';
-
-            } catch (e) {
-                alert("Error reading file: " + e.message);
+        document.getElementById('startPauseButton').addEventListener('click', () => {
+            initAudio();
+            if (!isPaused) {
+                isPaused = true;
+                clearInterval(timerInterval);
+                document.getElementById('startPauseButton').textContent = "Resume";
+            } else {
+                if (secondsElapsed === 0) {
+                    let count = 3;
+                    const launcher = setInterval(() => {
+                        playPip(true);
+                        count--;
+                        if (count <= 0) { clearInterval(launcher); startTimerLogic(); }
+                    }, 1000);
+                } else {
+                    startTimerLogic();
+                }
             }
         });
 
-        // Run scan on load
-        scanFiles();
+        // GITHUB AUTO-SCAN
+        async function scanGitHub() {
+            const url = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/`;
+            try {
+                const response = await fetch(url);
+                const files = await response.json();
+                const tsFiles = files.filter(f => f.name.startsWith('TS') && f.name.endsWith('.txt'));
+                const sel = document.getElementById('workoutSelect');
+                tsFiles.forEach(f => {
+                    let opt = document.createElement('option');
+                    opt.value = f.name; opt.textContent = f.name;
+                    sel.appendChild(opt);
+                });
+            } catch (e) { document.getElementById('status').textContent = "Scan Error"; }
+        }
+
+        document.getElementById('loadWorkoutBtn').addEventListener('click', async () => {
+            const fileName = document.getElementById('workoutSelect').value;
+            if (fileName === "manual") { workoutQueue = []; return; }
+            try {
+                const response = await fetch(fileName, {cache: "no-store"});
+                const text = await response.text();
+                workoutQueue = parseWorkout(text);
+                currentSegmentIndex = -1;
+                if (workoutQueue.length > 0) {
+                    sendPower(workoutQueue[0].w);
+                    document.getElementById('status').textContent = "Ready: " + fileName;
+                }
+            } catch (e) { document.getElementById('status').textContent = "Load Error"; }
+        } );
+
+        document.getElementById('beepToggleButton').addEventListener('click', () => {
+            initAudio();
+            beepEnabled = !beepEnabled;
+            document.getElementById('beepToggleButton').textContent = beepEnabled ? "Beep: ON" : "Beep: OFF";
+        });
+
+        document.getElementById('increaseButton').addEventListener('click', () => sendPower(targetWatts + 10));
+        document.getElementById('decreaseButton').addEventListener('click', () => sendPower(targetWatts - 10));
+
+        document.getElementById('connectButton').addEventListener('click', async () => {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: "KICKR" }], optionalServices: [SERVICE_UUID]
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
+                await controlChar.startNotifications();
+                await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
+                document.getElementById('status').textContent = "Connected";
+                sendPower(targetWatts);
+            } catch (e) { document.getElementById('status').textContent = "Error"; }
+        });
+
+        scanGitHub();
     </script>
 </body>
 </html>
