@@ -3,25 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Acorn4</title>
+    <title>KICKR Beech 2.0</title>
     <style>
-        body { font-family: system-ui, sans-serif; padding: 15px; max-width: 500px; margin: auto; background: #fff; }
-        button { width: 100%; padding: 25px 10px; font-size: 1.3rem; border-radius: 12px; border: 2px solid #000; background: #f8f8f8; color: black; font-weight: bold; }
-        
-        /* Full width clock */
-        .timer-display { width: 100%; font-size: 3rem; text-align: center; margin: 10px 0; padding: 20px 0; border: 2px solid #333; border-radius: 12px; display: block; }
-        
-        /* Side-by-side buttons */
-        .button-row { display: flex; gap: 10px; width: 100%; }
+        body { font-family: system-ui, sans-serif; padding: 15px; max-width: 500px; margin: auto; }
+        button { width: 100%; padding: 25px 10px; font-size: 1.3rem; border-radius: 12px; border: 2px solid #000; background: #f8f8f8; font-weight: bold; }
+        .timer-display { width: 100%; font-size: 3.5rem; text-align: center; margin: 10px 0; padding: 20px 0; border: 2px solid #333; border-radius: 12px; display: block; }
+        .button-row { display: flex; gap: 10px; width: 100%; margin-bottom: 10px; }
         .button-row button { flex: 1; }
-
-        .power-display { font-size: 2rem; text-align: center; margin: 15px 0; padding: 25px 0; border: 2px solid #333; border-radius: 12px; }
-        #debugLog { background: #000; color: #0f0; font-family: monospace; font-size: 10px; height: 70px; overflow-y: scroll; padding: 10px; margin-top: 15px; }
+        .power-display { font-size: 2rem; text-align: center; margin: 10px 0; padding: 20px 0; border: 2px solid #333; border-radius: 12px; }
+        .instruction-box { background: #eef; padding: 25px; border: 2px dashed #333; border-radius: 12px; text-align: center; font-size: 1.4rem; min-height: 50px; }
+        select { width: 100%; padding: 20px; font-size: 1.2rem; border-radius: 12px; border: 2px solid #000; margin-top: 10px; }
     </style>
 </head>
 <body>
 
-    <h1 id="mainTitle">KICKR Acorn4</h1>
+    <h1 id="mainTitle">KICKR Beech 2.0</h1>
 
     <button id="connectButton">Connect to KICKR</button>
     <p id="status" role="status" style="text-align: center;">Status: Disconnected</p>
@@ -35,7 +31,11 @@
         <button id="beepToggleButton" aria-pressed="false">Beep: OFF</button>
     </div>
 
-    <div class="power-display" id="powerRegion" aria-live="assertive" role="text">
+    <div class="instruction-box" id="instructionRegion" aria-live="assertive" role="region" aria-label="Current Instruction">
+        <span id="currentInstruction">Manual Mode</span>
+    </div>
+
+    <div class="power-display" id="powerRegion" aria-live="polite">
         <strong id="targetWattsDisplay" aria-label="Target 150 Watts">Target 150W</strong>
     </div>
     
@@ -44,9 +44,11 @@
         <button id="increaseButton" aria-label="Increase Power">+ 10W</button>
     </div>
 
-    <div id="debugLog" role="log" aria-label="System Logs">
-        [Acorn4 Ready]<br>
-    </div>
+    <label for="workoutSelect" style="display:block; margin-top:20px; font-weight:bold;">Select Training Session:</label>
+    <select id="workoutSelect">
+        <option value="manual">Manual Mode</option>
+        </select>
+    <button id="loadWorkoutBtn" style="margin-top:10px; background:#e0e0e0;">Confirm Workout Choice</button>
 
     <script>
         let controlChar = null;
@@ -59,19 +61,18 @@
         let isPaused = true;
         let beepEnabled = false;
         
+        let workoutQueue = [];
+        let currentSegmentIndex = -1;
+        let segmentSecondsRemaining = 0;
+
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-        function log(msg) {
-            const el = document.getElementById('debugLog');
-            el.innerHTML += msg + "<br>";
-            el.scrollTop = el.scrollHeight;
-        }
-
-        function playPip() {
-            if (!beepEnabled) return;
+        // VoiceOver and Audio Helpers
+        function playPip(isCountdown = false) {
+            if (!beepEnabled && !isCountdown) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime); 
+            osc.frequency.setValueAtTime(isCountdown ? 1200 : 880, audioCtx.currentTime); 
             gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
             osc.connect(gain);
@@ -80,14 +81,58 @@
             osc.stop(audioCtx.currentTime + 0.1);
         }
 
-        function updateStartButtonLabel() {
-            const btn = document.getElementById('startPauseButton');
-            if (!isPaused) {
-                btn.textContent = "Pause Session";
-            } else if (secondsElapsed > 0) {
-                btn.textContent = "Resume Session";
+        async function sendPower(watts) {
+            targetWatts = watts;
+            document.getElementById('targetWattsDisplay').textContent = "Target " + watts + "W";
+            document.getElementById('targetWattsDisplay').setAttribute('aria-label', "Target " + watts + " Watts");
+            if (!controlChar) return;
+            try {
+                const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
+                await controlChar.writeValueWithResponse(data);
+            } catch (e) { console.error(e); }
+        }
+
+        // PARSER: Handles Name, StartLoop, and EndLoop
+        function parseWorkout(text) {
+            const lines = text.split('\n');
+            let parsed = [];
+            let loopItems = [];
+            let inLoop = false;
+
+            lines.forEach(line => {
+                const clean = line.trim();
+                if (clean.startsWith('Name:')) return;
+                if (clean === 'StartLoop') { inLoop = true; return; }
+                if (clean === 'EndLoop') {
+                    inLoop = false;
+                    // For now, we expand the loop once. We can add multiplier logic later.
+                    parsed = parsed.concat(loopItems); 
+                    return;
+                }
+                const parts = clean.split(',');
+                if (parts.length === 2) {
+                    const item = { w: parseInt(parts[0]), d: parseInt(parts[1]) * 60 };
+                    if (inLoop) loopItems.push(item);
+                    else parsed.push(item);
+                }
+            });
+            return parsed;
+        }
+
+        function nextSegment() {
+            currentSegmentIndex++;
+            if (currentSegmentIndex < workoutQueue.length) {
+                const seg = workoutQueue[currentSegmentIndex];
+                segmentSecondsRemaining = seg.d;
+                
+                // Update UI and trigger VoiceOver
+                const msg = `New Segment: ${seg.w} Watts`;
+                document.getElementById('currentInstruction').textContent = msg;
+                sendPower(seg.w);
             } else {
-                btn.textContent = "Start Session";
+                isPaused = true;
+                clearInterval(timerInterval);
+                document.getElementById('currentInstruction').textContent = "Workout Complete";
             }
         }
 
@@ -95,57 +140,71 @@
             if (isPaused) {
                 isPaused = false;
                 audioCtx.resume();
-                updateStartButtonLabel();
                 timerInterval = setInterval(() => {
                     secondsElapsed++;
                     const mins = Math.floor(secondsElapsed / 60);
                     const secs = secondsElapsed % 60;
                     document.getElementById('timerDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-                    playPip();
+                    
+                    if (workoutQueue.length > 0) {
+                        segmentSecondsRemaining--;
+                        
+                        // Countdown Pips at 3, 2, 1 seconds left
+                        if (segmentSecondsRemaining <= 3 && segmentSecondsRemaining > 0) {
+                            if (segmentSecondsRemaining === 3) {
+                                // Move focus to instruction box so VoiceOver reads the upcoming change
+                                document.getElementById('instructionRegion').focus();
+                            }
+                            playPip(true);
+                        }
+                        
+                        if (segmentSecondsRemaining <= 0) {
+                            nextSegment();
+                        }
+                    } else {
+                        playPip();
+                    }
                 }, 1000);
             } else {
                 isPaused = true;
                 clearInterval(timerInterval);
-                updateStartButtonLabel();
             }
         });
 
-        document.getElementById('beepToggleButton').addEventListener('click', () => {
-            beepEnabled = !beepEnabled;
-            audioCtx.resume();
-            document.getElementById('beepToggleButton').textContent = beepEnabled ? "Beep: ON" : "Beep: OFF";
-            document.getElementById('beepToggleButton').setAttribute('aria-pressed', beepEnabled);
+        // WORKOUT LOADING LOGIC
+        // You will need to manually list your TS files here or have a manifest.json
+        const knownFiles = ["TS01.txt", "TS02.txt", "TS03.txt"]; 
+        const select = document.getElementById('workoutSelect');
+        knownFiles.forEach(file => {
+            let opt = document.createElement('option');
+            opt.value = file;
+            opt.innerHTML = file;
+            select.appendChild(opt);
         });
 
-        async function sendPower(watts) {
-            if (!controlChar) return;
+        document.getElementById('loadWorkoutBtn').addEventListener('click', async () => {
+            const fileName = document.getElementById('workoutSelect').value;
+            if (fileName === "manual") {
+                workoutQueue = [];
+                document.getElementById('currentInstruction').textContent = "Manual Mode";
+                return;
+            }
             try {
-                const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
-                await controlChar.writeValueWithResponse(data);
-            } catch (e) { log("Err: " + e.message); }
-        }
-
-        document.getElementById('increaseButton').addEventListener('click', () => {
-            targetWatts += 10;
-            const display = document.getElementById('targetWattsDisplay');
-            display.textContent = "Target " + targetWatts + "W";
-            display.setAttribute('aria-label', "Target " + targetWatts + " Watts");
-            sendPower(targetWatts);
+                const response = await fetch(fileName);
+                const text = await response.text();
+                workoutQueue = parseWorkout(text);
+                currentSegmentIndex = -1;
+                document.getElementById('currentInstruction').textContent = "Workout Loaded: " + fileName;
+            } catch (e) {
+                document.getElementById('currentInstruction').textContent = "Error loading file.";
+            }
         });
 
-        document.getElementById('decreaseButton').addEventListener('click', () => {
-            targetWatts = Math.max(10, targetWatts - 10);
-            const display = document.getElementById('targetWattsDisplay');
-            display.textContent = "Target " + targetWatts + "W";
-            display.setAttribute('aria-label', "Target " + targetWatts + " Watts");
-            sendPower(targetWatts);
-        });
-
+        // Bluetooth Logic (Redstart baseline)
         document.getElementById('connectButton').addEventListener('click', async () => {
             try {
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ namePrefix: "KICKR" }],
-                    optionalServices: [SERVICE_UUID]
+                    filters: [{ namePrefix: "KICKR" }], optionalServices: [SERVICE_UUID]
                 });
                 const server = await device.gatt.connect();
                 const service = await server.getPrimaryService(SERVICE_UUID);
@@ -154,10 +213,8 @@
                 await new Promise(r => setTimeout(r, 1000));
                 await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
                 document.getElementById('status').textContent = "Status: Connected";
-                log("Unlocked.");
-                // Set initial default power to KICKR on connect
                 sendPower(targetWatts);
-            } catch (e) { log("Error: " + e.message); }
+            } catch (e) { document.getElementById('status').textContent = "Error: " + e.message; }
         });
     </script>
 </body>
