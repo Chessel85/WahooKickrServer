@@ -3,26 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Beech 3</title>
+    <title>KICKR Beech 4</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 15px; max-width: 500px; margin: auto; background: #fff; }
         button { width: 100%; padding: 25px 10px; font-size: 1.3rem; border-radius: 12px; border: 2px solid #000; background: #f8f8f8; color: black; font-weight: bold; }
         button:disabled { opacity: 0.5; border-color: #ccc; }
-        
         .timer-display { width: 100%; font-size: 3.5rem; text-align: center; margin: 10px 0; padding: 20px 0; border: 2px solid #333; border-radius: 12px; display: block; }
         .button-row { display: flex; gap: 10px; width: 100%; margin-bottom: 10px; }
         .button-row button { flex: 1; }
-
         .instruction-box { background: #eef; padding: 25px; border: 2px dashed #333; border-radius: 12px; text-align: center; font-size: 1.4rem; min-height: 40px; }
         .power-display { font-size: 2rem; text-align: center; margin: 10px 0; padding: 20px 0; border: 2px solid #333; border-radius: 12px; }
-        
         select { flex: 2; padding: 20px; font-size: 1.1rem; border-radius: 12px; border: 2px solid #000; }
         #loadWorkoutBtn { flex: 1; padding: 10px; font-size: 1rem; background: #e0e0e0; }
     </style>
 </head>
 <body>
 
-    <h1 id="mainTitle">KICKR Beech 3</h1>
+    <h1 id="mainTitle">KICKR Beech 4</h1>
 
     <button id="connectButton">Connect to KICKR</button>
     <p id="status" role="status" style="text-align: center;">Status: Disconnected</p>
@@ -70,26 +67,22 @@
         let workoutQueue = [];
         let currentSegmentIndex = -1;
         let segmentSecondsRemaining = 0;
-
-        // Ensure AudioContext is handled correctly for iOS
         let audioCtx = null;
 
         function initAudio() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
+            if (audioCtx.state === 'suspended') audioCtx.resume();
         }
 
         function playPip(isCountdown = false) {
             if (!audioCtx) return;
+            // High-pitched pips always play for countdowns, regardless of toggle
             if (!beepEnabled && !isCountdown) return;
             
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            // Countdown pips are higher pitched (1200Hz) vs standard (880Hz)
             osc.frequency.setValueAtTime(isCountdown ? 1200 : 880, audioCtx.currentTime); 
             gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
@@ -101,13 +94,9 @@
 
         function updateStartButtonLabel() {
             const btn = document.getElementById('startPauseButton');
-            if (!isPaused) {
-                btn.textContent = "Pause Session";
-            } else if (secondsElapsed > 0) {
-                btn.textContent = "Resume Session";
-            } else {
-                btn.textContent = "Start Session";
-            }
+            if (!isPaused) btn.textContent = "Pause Session";
+            else if (secondsElapsed > 0) btn.textContent = "Resume Session";
+            else btn.textContent = "Start Session";
         }
 
         async function sendPower(watts) {
@@ -122,30 +111,6 @@
             } catch (e) { console.error("BLE Error"); }
         }
 
-        function parseWorkout(text) {
-            const lines = text.split('\n');
-            let parsed = [];
-            let loopItems = [];
-            let inLoop = false;
-            lines.forEach(line => {
-                const clean = line.trim();
-                if (clean.startsWith('Name:') || clean === "") return;
-                if (clean === 'StartLoop') { inLoop = true; return; }
-                if (clean === 'EndLoop') {
-                    inLoop = false;
-                    parsed = parsed.concat(loopItems); 
-                    return;
-                }
-                const parts = clean.split(',');
-                if (parts.length === 2) {
-                    const item = { w: parseInt(parts[0]), d: parseInt(parts[1]) * 60 };
-                    if (inLoop) loopItems.push(item);
-                    else parsed.push(item);
-                }
-            });
-            return parsed;
-        }
-
         function nextSegment() {
             currentSegmentIndex++;
             if (currentSegmentIndex < workoutQueue.length) {
@@ -154,44 +119,67 @@
                 document.getElementById('currentInstruction').textContent = `Set: ${seg.w}W`;
                 sendPower(seg.w);
             } else {
-                isPaused = true;
-                clearInterval(timerInterval);
-                updateStartButtonLabel();
+                stopTimer();
                 document.getElementById('currentInstruction').textContent = "Finish!";
             }
         }
 
+        function startTimerLogic() {
+            isPaused = false;
+            document.getElementById('workoutSelect').disabled = true;
+            document.getElementById('loadWorkoutBtn').disabled = true;
+            updateStartButtonLabel();
+            
+            timerInterval = setInterval(() => {
+                secondsElapsed++;
+                const mins = Math.floor(secondsElapsed / 60);
+                const secs = secondsElapsed % 60;
+                document.getElementById('timerDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+                
+                if (workoutQueue.length > 0) {
+                    segmentSecondsRemaining--;
+                    if (segmentSecondsRemaining <= 3 && segmentSecondsRemaining > 0) {
+                        playPip(true);
+                    }
+                    if (segmentSecondsRemaining <= 0) nextSegment();
+                } else {
+                    playPip();
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            isPaused = true;
+            clearInterval(timerInterval);
+            updateStartButtonLabel();
+        }
+
         document.getElementById('startPauseButton').addEventListener('click', () => {
             initAudio();
-            if (isPaused) {
-                isPaused = false;
-                // Disable file selection while running
-                document.getElementById('workoutSelect').disabled = true;
-                document.getElementById('loadWorkoutBtn').disabled = true;
-                
-                updateStartButtonLabel();
-                timerInterval = setInterval(() => {
-                    secondsElapsed++;
-                    const mins = Math.floor(secondsElapsed / 60);
-                    const secs = secondsElapsed % 60;
-                    document.getElementById('timerDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-                    
-                    if (workoutQueue.length > 0) {
-                        segmentSecondsRemaining--;
-                        if (segmentSecondsRemaining <= 3 && segmentSecondsRemaining > 0) {
-                            playPip(true); // Countdown pips
-                        }
-                        if (segmentSecondsRemaining <= 0) {
-                            nextSegment();
-                        }
-                    } else {
-                        playPip(); // Regular metronome pips
-                    }
-                }, 1000);
+            if (!isPaused) {
+                stopTimer();
             } else {
-                isPaused = true;
-                clearInterval(timerInterval);
-                updateStartButtonLabel();
+                // If it's a BRAND NEW start (time is 0)
+                if (secondsElapsed === 0) {
+                    let launchCount = 3;
+                    document.getElementById('startPauseButton').disabled = true;
+                    document.getElementById('currentInstruction').textContent = "Starting in 3...";
+                    
+                    const launcher = setInterval(() => {
+                        playPip(true);
+                        launchCount--;
+                        if (launchCount > 0) {
+                            document.getElementById('currentInstruction').textContent = `Starting in ${launchCount}...`;
+                        } else {
+                            clearInterval(launcher);
+                            document.getElementById('startPauseButton').disabled = false;
+                            startTimerLogic();
+                        }
+                    }, 1000);
+                } else {
+                    // It's a Resume
+                    startTimerLogic();
+                }
             }
         });
 
@@ -202,7 +190,6 @@
             document.getElementById('beepToggleButton').setAttribute('aria-pressed', beepEnabled);
         });
 
-        // Workout File List - Manual list as requested
         const knownFiles = ["TS01.txt", "TS02.txt", "TS03.txt"]; 
         const select = document.getElementById('workoutSelect');
         knownFiles.forEach(file => {
@@ -222,12 +209,25 @@
             try {
                 const response = await fetch(fileName);
                 const text = await response.text();
-                workoutQueue = parseWorkout(text);
+                workoutQueue = (function(text){
+                    const lines = text.split('\n');
+                    let parsed = []; let loopItems = []; let inLoop = false;
+                    lines.forEach(line => {
+                        const clean = line.trim();
+                        if (clean.startsWith('Name:') || clean === "") return;
+                        if (clean === 'StartLoop') { inLoop = true; return; }
+                        if (clean === 'EndLoop') { inLoop = false; parsed = parsed.concat(loopItems); return; }
+                        const parts = clean.split(',');
+                        if (parts.length === 2) {
+                            const item = { w: parseInt(parts[0]), d: parseInt(parts[1]) * 60 };
+                            if (inLoop) loopItems.push(item); else parsed.push(item);
+                        }
+                    });
+                    return parsed;
+                })(text);
                 currentSegmentIndex = -1;
                 document.getElementById('currentInstruction').textContent = "Loaded: " + fileName;
-            } catch (e) {
-                document.getElementById('currentInstruction').textContent = "File Error";
-            }
+            } catch (e) { document.getElementById('currentInstruction').textContent = "File Error"; }
         });
 
         document.getElementById('increaseButton').addEventListener('click', () => sendPower(targetWatts + 10));
