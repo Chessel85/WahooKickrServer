@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Beech 6</title>
+    <title>KICKR Beech 7</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 10px; max-width: 500px; margin: auto; background: #fff; }
         button { width: 100%; padding: 35px 10px; font-size: 1.5rem; border-radius: 15px; border: 3px solid #000; background: #f8f8f8; color: black; font-weight: bold; }
@@ -18,6 +18,8 @@
     </style>
 </head>
 <body>
+
+    <h1 id="mainTitle">KICKR Beech 7</h1>
 
     <button id="connectButton">Connect to KICKR</button>
     <p id="status" role="status" style="text-align: center; font-weight: bold;">Status: Disconnected</p>
@@ -93,12 +95,12 @@
 
         async function sendPower(watts) {
             if (isNaN(watts)) return;
-            targetWatts = watts;
-            document.getElementById('targetWattsDisplay').textContent = "Target " + watts + "W";
-            document.getElementById('targetWattsDisplay').setAttribute('aria-label', "Target " + watts + " Watts");
+            targetWatts = parseInt(watts); // Force integer
+            document.getElementById('targetWattsDisplay').textContent = "Target " + targetWatts + "W";
+            document.getElementById('targetWattsDisplay').setAttribute('aria-label', "Target " + targetWatts + " Watts");
             if (!controlChar) return;
             try {
-                const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
+                const data = new Uint8Array([0x42, targetWatts & 0xFF, (targetWatts >> 8) & 0xFF]);
                 await controlChar.writeValueWithResponse(data);
             } catch (e) { console.error("BLE Error"); }
         }
@@ -111,7 +113,6 @@
             
             lines.forEach(line => {
                 const clean = line.trim();
-                // Skip comments, names, or empty lines
                 if (!clean || clean.startsWith('#') || clean.toLowerCase().startsWith('name:')) return;
                 
                 if (clean === 'StartLoop') { inLoop = true; return; }
@@ -155,7 +156,7 @@
             document.getElementById('loadWorkoutBtn').disabled = true;
             updateStartButtonLabel();
             
-            // If we have a workout loaded and haven't started segments yet
+            // Critical: Ensure we advance into the first segment if a workout is loaded
             if (workoutQueue.length > 0 && currentSegmentIndex === -1) {
                 nextSegment();
             }
@@ -217,16 +218,22 @@
 
         document.getElementById('loadWorkoutBtn').addEventListener('click', async () => {
             const fileName = document.getElementById('workoutSelect').value;
-            if (fileName === "manual") { workoutQueue = []; return; }
+            if (fileName === "manual") { 
+                workoutQueue = []; 
+                currentSegmentIndex = -1;
+                return; 
+            }
             try {
                 const response = await fetch(fileName);
                 const text = await response.text();
-                workoutQueue = parseWorkout(text);
-                currentSegmentIndex = -1; // Ready to start first segment
+                const newQueue = parseWorkout(text);
                 
-                // NEW: Update display immediately with the first segment's power
-                if (workoutQueue.length > 0) {
-                    sendPower(workoutQueue[0].w);
+                if (newQueue.length > 0) {
+                    workoutQueue = newQueue;
+                    currentSegmentIndex = -1;
+                    // FORCE UPDATE: Immediately push the first segment power to UI
+                    targetWatts = workoutQueue[0].w;
+                    sendPower(targetWatts);
                     document.getElementById('status').textContent = "Ready: " + fileName;
                 }
             } catch (e) { document.getElementById('status').textContent = "Load Error"; }
@@ -246,7 +253,12 @@
                 await controlChar.startNotifications();
                 await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
                 document.getElementById('status').textContent = "Connected";
-                sendPower(targetWatts);
+                // Only send default power if no workout is loaded
+                if (currentSegmentIndex === -1 && workoutQueue.length === 0) {
+                    sendPower(150);
+                } else if (workoutQueue.length > 0) {
+                    sendPower(workoutQueue[0].w);
+                }
             } catch (e) { document.getElementById('status').textContent = "Error"; }
         });
     </script>
