@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Beech 16</title>
+    <title>KICKR Beech 18</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 10px; max-width: 500px; margin: auto; background: #fff; }
         .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
@@ -26,7 +26,7 @@
 
     <div class="top-row">
         <button id="connectButton">Connect KICKR</button>
-        <div id="status" role="status">Beech 16: Disconnected</div>
+        <div id="status" role="status">Beech 18: Disconnected</div>
     </div>
 
     <div class="timer-display" role="timer" id="clockContainer" tabIndex="0">
@@ -50,8 +50,8 @@
     </div>
     
     <div class="button-row">
-        <button id="decreaseButton" aria-label="Decrease Power">- 10W</button>
-        <button id="increaseButton" aria-label="Increase Power">+ 10W</button>
+        <button id="decreaseButton">- 10W</button>
+        <button id="increaseButton">+ 10W</button>
     </div>
 
     <div id="instructionRegion" aria-live="assertive" class="sr-only"></div>
@@ -90,12 +90,10 @@
         function playPip(type = 'normal') {
             initAudio();
             if (!audioCtx || audioCtx.state !== 'running') return;
-
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.connect(gain);
             gain.connect(audioCtx.destination);
-
             if (type === 'countdown') {
                 osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
                 gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
@@ -106,7 +104,6 @@
                 osc.frequency.setValueAtTime(880, audioCtx.currentTime);
                 gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
             }
-
             gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
             osc.start();
             osc.stop(audioCtx.currentTime + 0.1);
@@ -199,51 +196,50 @@
             }
         }
 
-        // UNIFIED HEARTBEAT
         function startTimerLogic() {
             isPaused = false;
             document.getElementById('startPauseButton').textContent = "Pause";
             if (workoutQueue.length > 0 && currentSegmentIndex === -1) nextSegment();
-
             timerInterval = setInterval(() => {
                 secondsElapsed++;
-                const mins = Math.floor(secondsElapsed / 60);
-                const secs = secondsElapsed % 60;
-                document.getElementById('timerDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+                document.getElementById('timerDisplay').textContent = `${Math.floor(secondsElapsed / 60)}:${(secondsElapsed % 60).toString().padStart(2, '0')}`;
                 updateAriaLabels();
-
                 if (workoutQueue.length > 0) {
                     segmentSecondsRemaining--;
-                    const isLastSeg = (currentSegmentIndex === workoutQueue.length - 1);
-                    
-                    if (segmentSecondsRemaining <= 0) {
-                        nextSegment();
-                    } else if (segmentSecondsRemaining <= 3 && !isLastSeg) {
-                        playPip('countdown');
-                    } else if (beepEnabled) {
-                        playPip('normal');
-                    }
+                    if (segmentSecondsRemaining <= 0) nextSegment();
+                    else if (segmentSecondsRemaining <= 3 && currentSegmentIndex < workoutQueue.length - 1) playPip('countdown');
+                    else if (beepEnabled) playPip('normal');
                 } else if (beepEnabled) {
                     playPip('normal');
                 }
             }, 1000);
         }
 
+        // RESTORED ACORN 4 DISCOVERY
         document.getElementById('connectButton').addEventListener('click', async () => {
             initAudio();
             try {
+                // Exact discovery logic from Acorn 4
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ namePrefix: "KICKR" }], optionalServices: [SERVICE_UUID]
+                    filters: [{ namePrefix: "KICKR" }],
+                    optionalServices: [SERVICE_UUID]
                 });
+                
                 const server = await device.gatt.connect();
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
                 await controlChar.startNotifications();
+                
+                // Keep the sleep for hardware stability
+                await new Promise(r => setTimeout(r, 1000));
+                
                 await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
-                document.getElementById('status').textContent = "Beech 16: Connected";
+                document.getElementById('status').textContent = "Beech 18: Connected";
                 sendPower(targetWatts);
                 playPip('countdown'); 
-            } catch (e) { document.getElementById('status').textContent = "Beech 16: Error"; }
+            } catch (e) { 
+                document.getElementById('status').textContent = "Beech 18: Error"; 
+            }
         });
 
         document.getElementById('startPauseButton').addEventListener('click', () => {
@@ -279,9 +275,9 @@
                 const text = await response.text();
                 workoutQueue = parseWorkout(text);
                 currentSegmentIndex = -1;
-                document.getElementById('status').textContent = "Beech 16: Ready";
+                document.getElementById('status').textContent = "Beech 18: Ready";
                 sendPower(workoutQueue[0].w, workoutQueue[0].dm);
-            } catch (e) { document.getElementById('status').textContent = "Beech 16: Error"; }
+            } catch (e) { document.getElementById('status').textContent = "Beech 18: Error"; }
         });
 
         async function scanGitHub() {
