@@ -3,18 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KICKR Beech 11</title>
+    <title>KICKR Beech 12</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 10px; max-width: 500px; margin: auto; background: #fff; }
         .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         #connectButton { flex: 2; padding: 15px; font-size: 1.1rem; border-radius: 12px; border: 3px solid #000; font-weight: bold; }
-        #status { flex: 1; text-align: right; font-weight: bold; margin: 0; padding-right: 5px; }
-        .timer-display { width: 100%; font-size: 4rem; text-align: center; margin-bottom: 10px; padding: 20px 0; border: 3px solid #333; border-radius: 15px; display: block; }
+        #status { flex: 1.5; text-align: right; font-weight: bold; margin: 0; font-size: 0.85rem; color: #333; }
+        .timer-display { width: 100%; font-size: 4rem; text-align: center; margin-bottom: 10px; padding: 20px 0; border: 3px solid #333; border-radius: 15px; }
         .button-row { display: flex; gap: 10px; margin-bottom: 10px; }
         .button-row button { flex: 1; padding: 30px 5px; font-size: 1.4rem; border-radius: 15px; border: 3px solid #000; font-weight: bold; background: #f8f8f8; }
         .info-grid { display: flex; gap: 10px; margin-bottom: 10px; }
-        .info-cell { flex: 1; border: 3px solid #333; border-radius: 15px; padding: 25px 5px; text-align: center; font-size: 1.8rem; font-weight: bold; min-height: 60px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
-        .info-cell span { font-size: 1rem; color: #444; text-transform: uppercase; margin-bottom: 5px; }
+        .info-cell { flex: 1; border: 3px solid #333; border-radius: 15px; padding: 20px 5px; text-align: center; font-size: 1.8rem; font-weight: bold; }
+        .info-cell span { font-size: 0.9rem; color: #666; display: block; margin-bottom: 5px; }
         .select-row { display: flex; gap: 10px; margin-top: 20px; }
         select { flex: 2; padding: 15px; border-radius: 12px; border: 2px solid #000; font-size: 1rem; }
         #loadWorkoutBtn { flex: 1; padding: 15px; border-radius: 12px; border: 2px solid #000; font-size: 1rem; font-weight: bold; }
@@ -24,25 +24,25 @@
 <body>
 
     <div class="top-row">
-        <button id="connectButton">Connect KICKR</button>
-        <div id="status" role="status" aria-live="polite">Disconnected</div>
+        <button id="connectButton" onclick="initAudio()">Connect KICKR</button>
+        <div id="status" role="status">Beech 12: Disconnected</div>
     </div>
 
-    <div class="timer-display" id="timerContainer" tabIndex="0" role="timer" aria-label="Clock">
+    <div class="timer-display" role="timer" aria-label="Clock">
         <strong id="timerDisplay">0:00</strong>
     </div>
     
     <div class="button-row">
-        <button id="startPauseButton">Start</button>
-        <button id="beepToggleButton" aria-label="Beeps Off">Beeps Off</button>
+        <button id="startPauseButton" onclick="initAudio()">Start</button>
+        <button id="beepToggleButton" onclick="initAudio()" aria-label="Beeps Off">Beeps Off</button>
     </div>
 
     <div class="info-grid">
-        <div class="info-cell" id="wattsCell" tabIndex="0">
+        <div class="info-cell" aria-label="Target Watts">
             <span>Target</span>
             <strong id="targetWattsDisplay">150W</strong>
         </div>
-        <div class="info-cell" id="durationCell" tabIndex="0">
+        <div class="info-cell" aria-label="Time Remaining">
             <span>Duration</span>
             <strong id="durationDisplay">Manual</strong>
         </div>
@@ -56,12 +56,13 @@
     <div id="instructionRegion" aria-live="assertive" class="sr-only"></div>
 
     <div class="select-row">
-        <select id="workoutSelect" aria-label="Select Workout"></select>
+        <select id="workoutSelect">
+            <option value="manual">Manual Mode</option>
+        </select>
         <button id="loadWorkoutBtn">Confirm</button>
     </div>
 
     <script>
-        // FIXED GITHUB CONFIGURATION
         const GITHUB_USER = 'Chessel85'; 
         const GITHUB_REPO = 'WahooKickrServer';
 
@@ -80,22 +81,20 @@
         let segmentSecondsRemaining = 0;
         let audioCtx = null;
 
+        // Restore Audio Logic from Beech 7
         function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
         }
 
         function playPip(isCountdown = false) {
-            initAudio();
+            if (!audioCtx) return;
             if (!beepEnabled && !isCountdown) return;
-            
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.frequency.setValueAtTime(isCountdown ? 1200 : 880, audioCtx.currentTime); 
-            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
@@ -111,13 +110,11 @@
             targetWatts = parseInt(watts);
             document.getElementById('targetWattsDisplay').textContent = targetWatts + "W";
             const durText = document.getElementById('durationDisplay');
-            
             if (durationMins !== null && workoutQueue.length > 0) {
                 durText.textContent = formatDurationText(durationMins);
             } else {
                 durText.textContent = "Manual";
             }
-
             if (!controlChar) return;
             try {
                 const data = new Uint8Array([0x42, targetWatts & 0xFF, (targetWatts >> 8) & 0xFF]);
@@ -131,7 +128,6 @@
             let loopItems = [];
             let inLoop = false;
             let loopReps = 1;
-
             lines.forEach(line => {
                 const clean = line.trim();
                 if (!clean || clean.startsWith('#') || clean.toLowerCase().startsWith('name:')) return;
@@ -166,7 +162,7 @@
             if (currentSegmentIndex < workoutQueue.length) {
                 const seg = workoutQueue[currentSegmentIndex];
                 segmentSecondsRemaining = seg.d;
-                document.getElementById('instructionRegion').textContent = `Power set to ${seg.w} Watts`;
+                document.getElementById('instructionRegion').textContent = `Set to ${seg.w} Watts`;
                 sendPower(seg.w, seg.dm);
             } else {
                 isPaused = true;
@@ -179,13 +175,11 @@
             isPaused = false;
             document.getElementById('startPauseButton').textContent = "Pause";
             if (workoutQueue.length > 0 && currentSegmentIndex === -1) nextSegment();
-
             timerInterval = setInterval(() => {
                 secondsElapsed++;
                 const mins = Math.floor(secondsElapsed / 60);
                 const secs = secondsElapsed % 60;
                 document.getElementById('timerDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-                
                 if (workoutQueue.length > 0) {
                     segmentSecondsRemaining--;
                     if (segmentSecondsRemaining <= 3 && segmentSecondsRemaining > 0) playPip(true);
@@ -197,7 +191,6 @@
         }
 
         document.getElementById('startPauseButton').addEventListener('click', () => {
-            initAudio();
             if (!isPaused) {
                 isPaused = true;
                 clearInterval(timerInterval);
@@ -217,17 +210,21 @@
         });
 
         document.getElementById('beepToggleButton').addEventListener('click', () => {
-            initAudio();
             beepEnabled = !beepEnabled;
             const btn = document.getElementById('beepToggleButton');
-            const stateText = beepEnabled ? "Beeps On" : "Beeps Off";
-            btn.textContent = stateText;
-            btn.setAttribute('aria-label', stateText);
+            btn.textContent = beepEnabled ? "Beeps On" : "Beeps Off";
+            btn.setAttribute('aria-label', btn.textContent);
             if (beepEnabled) playPip();
         });
 
         document.getElementById('loadWorkoutBtn').addEventListener('click', async () => {
             const fileName = document.getElementById('workoutSelect').value;
+            if (fileName === "manual") {
+                workoutQueue = [];
+                currentSegmentIndex = -1;
+                sendPower(150, null);
+                return;
+            }
             try {
                 const response = await fetch(fileName, {cache: "no-store"});
                 const text = await response.text();
@@ -235,9 +232,9 @@
                 currentSegmentIndex = -1;
                 if (workoutQueue.length > 0) {
                     sendPower(workoutQueue[0].w, workoutQueue[0].dm);
-                    document.getElementById('status').textContent = "Loaded";
+                    document.getElementById('status').textContent = "Beech 12: Ready";
                 }
-            } catch (e) { document.getElementById('status').textContent = "Error"; }
+            } catch (e) { document.getElementById('status').textContent = "Beech 12: Error"; }
         });
 
         async function scanGitHub() {
@@ -259,7 +256,6 @@
         document.getElementById('decreaseButton').addEventListener('click', () => sendPower(targetWatts - 10));
 
         document.getElementById('connectButton').addEventListener('click', async () => {
-            initAudio();
             try {
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ namePrefix: "KICKR" }], optionalServices: [SERVICE_UUID]
@@ -269,9 +265,9 @@
                 controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
                 await controlChar.startNotifications();
                 await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
-                document.getElementById('status').textContent = "Connected";
+                document.getElementById('status').textContent = "Beech 12: Connected";
                 sendPower(targetWatts);
-            } catch (e) { document.getElementById('status').textContent = "Error"; }
+            } catch (e) { document.getElementById('status').textContent = "Beech 12: Error"; }
         });
 
         scanGitHub();
