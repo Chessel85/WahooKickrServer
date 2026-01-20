@@ -1,0 +1,7 @@
+# very Short intervals
+100,0.2
+StartLoop,2
+230,0.25
+180,0.2
+EndLoop
+150,0.25
