@@ -3,69 +3,47 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cadence Discovery - Isaac Newton</title>
+    <title>Discovery - Ada Lovelace</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #fff; color: #000; }
-        .version { font-size: 0.8rem; color: #777; margin-bottom: 20px; }
-        button { 
-            width: 100%; padding: 20px; font-size: 1.3rem; font-weight: bold;
-            border: 2px solid #000; border-radius: 10px; background: #eee;
-        }
-        .method-box { 
-            border: 1px solid #ccc; margin-top: 20px; padding: 15px; border-radius: 8px;
-            text-align: center;
-        }
-        .rpm-value { font-size: 3.5rem; font-weight: bold; display: block; color: #000; }
-        .method-label { font-size: 1rem; color: #555; font-weight: bold; }
-        #status { margin-top: 20px; font-size: 0.9rem; color: #d00; }
+        body { font-family: sans-serif; padding: 15px; background: #fff; color: #000; }
+        .version { font-size: 0.9rem; font-weight: bold; color: #555; }
+        button { width: 100%; padding: 20px; font-size: 1.2rem; border: 2px solid #000; border-radius: 10px; margin: 10px 0; }
+        .method-box { border: 1px solid #000; margin-bottom: 10px; padding: 10px; }
+        .val { font-size: 1.8rem; font-weight: bold; display: block; }
     </style>
 </head>
 <body>
 
-    <div class="version">Version: Isaac Newton</div>
+    <div class="version">Version: Ada Lovelace</div>
     <button id="scanBtn">Connect Wahoo Sensor</button>
-
-    <div id="status">Status: Ready. Please pedal while connecting.</div>
+    <div id="status" aria-live="polite">Ready.</div>
 
     <div class="method-box">
-        <span class="method-label">Method A (Offset 1)</span>
-        <strong id="rpmA" class="rpm-value" aria-live="polite">--</strong>
-        <span>RPM</span>
+        <span>Method 1 (Byte 1): </span>
+        <strong id="v1" class="val" aria-live="polite">No Data</strong>
     </div>
 
     <div class="method-box">
-        <span class="method-label">Method B (Offset 7 - Standard Combo)</span>
-        <strong id="rpmB" class="rpm-value" aria-live="polite">--</strong>
-        <span>RPM</span>
+        <span>Method 2 (Byte 7): </span>
+        <strong id="v2" class="val" aria-live="polite">No Data</strong>
     </div>
 
     <div class="method-box">
-        <span class="method-label">Method C (Offset 5 - Alternate)</span>
-        <strong id="rpmC" class="rpm-value" aria-live="polite">--</strong>
-        <span>RPM</span>
+        <span>Method 3 (Byte 5): </span>
+        <strong id="v3" class="val" aria-live="polite">No Data</strong>
+    </div>
+
+    <div class="method-box">
+        <span>Method 4 (Byte 2): </span>
+        <strong id="v4" class="val" aria-live="polite">No Data</strong>
+    </div>
+
+    <div class="method-box">
+        <span>Method 5 (Byte 8): </span>
+        <strong id="v5" class="val" aria-live="polite">No Data</strong>
     </div>
 
     <script>
-        let lastVals = {
-            A: { rev: -1, time: -1 },
-            B: { rev: -1, time: -1 },
-            C: { rev: -1, time: -1 }
-        };
-
-        const calcRPM = (rev, time, key) => {
-            const last = lastVals[key];
-            if (last.rev !== -1 && rev !== last.rev) {
-                let rDiff = (rev - last.rev + 65536) % 65536;
-                let tDiff = (time - last.time + 65536) % 65536;
-                if (tDiff > 0) {
-                    const rpm = Math.round((rDiff / (tDiff / 1024)) * 60);
-                    document.getElementById('rpm' + key).textContent = rpm;
-                }
-            }
-            last.rev = rev;
-            last.time = time;
-        };
-
         document.getElementById('scanBtn').addEventListener('click', async () => {
             try {
                 const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [0x1816] }] });
@@ -74,19 +52,18 @@
                 const char = await service.getCharacteristic(0x2A5B);
                 
                 await char.startNotifications();
-                document.getElementById('status').textContent = "CONNECTED. Reading data...";
+                document.getElementById('status').textContent = "CONNECTED. Check values below.";
 
                 char.addEventListener('characteristicvaluechanged', (e) => {
                     const v = e.target.value;
                     
-                    // Method A: Assumes pure Cadence sensor (starts at byte 1)
-                    if (v.byteLength >= 5) calcRPM(v.getUint16(1, true), v.getUint16(3, true), 'A');
-                    
-                    // Method B: Assumes Wahoo Combo (Speed + Cadence). Cadence is bytes 7-10.
-                    if (v.byteLength >= 11) calcRPM(v.getUint16(7, true), v.getUint16(9, true), 'B');
-
-                    // Method C: Assumes alternate padding (Cadence is bytes 5-8).
-                    if (v.byteLength >= 9) calcRPM(v.getUint16(5, true), v.getUint16(7, true), 'C');
+                    // Display raw 16-bit totals at different offsets
+                    // If these numbers move while pedaling, that's our cadence!
+                    if (v.byteLength >= 3) document.getElementById('v1').textContent = v.getUint16(1, true);
+                    if (v.byteLength >= 9) document.getElementById('v2').textContent = v.getUint16(7, true);
+                    if (v.byteLength >= 7) document.getElementById('v3').textContent = v.getUint16(5, true);
+                    if (v.byteLength >= 4) document.getElementById('v4').textContent = v.getUint16(2, true);
+                    if (v.byteLength >= 10) document.getElementById('v5').textContent = v.getUint16(8, true);
                 });
             } catch (err) {
                 document.getElementById('status').textContent = "Error: " + err.message;
