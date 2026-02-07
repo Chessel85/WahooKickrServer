@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cadence - Rosalind Franklin</title>
+    <title>Cadence - Stephen Hawking</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 20px; text-align: center; background: #fff; color: #000; }
         .version { font-size: 0.8rem; color: #888; margin-bottom: 10px; }
@@ -19,7 +19,7 @@
 </head>
 <body>
 
-    <div class="version">Version: Rosalind Franklin</div>
+    <div class="version">Version: Stephen Hawking</div>
     <button id="connectBtn">Connect Wahoo Sensor</button>
 
     <div class="display-card" role="main">
@@ -49,32 +49,40 @@
                 const char = await service.getCharacteristic(0x2A5B);
                 
                 await char.startNotifications();
-                status.textContent = "Connected. Start pedaling!";
+                status.textContent = "Connected. Reading data...";
                 rpmDisplay.textContent = "0";
 
                 char.addEventListener('characteristicvaluechanged', (event) => {
                     const data = event.target.value;
                     
-                    // We proved "Method 1" works:
-                    // Revolutions at Byte 1, Event Time at Byte 3
+                    // Byte 1: Cumulative Crank Revolutions (Uint16)
+                    // Byte 3: Last Crank Event Time (Uint16)
                     const revCount = data.getUint16(1, true);
                     const eventTime = data.getUint16(3, true);
 
-                    if (lastRevCount !== -1 && revCount !== lastRevCount) {
+                    // If this is the very first packet, just save the values and wait for the next one
+                    if (lastRevCount === -1) {
+                        lastRevCount = revCount;
+                        lastEventTime = eventTime;
+                        status.textContent = "Initial sync... Keep pedaling.";
+                        return;
+                    }
+
+                    // If the revolution count has changed, we calculate RPM
+                    if (revCount !== lastRevCount) {
                         let revDiff = (revCount - lastRevCount + 65536) % 65536;
                         let timeDiff = (eventTime - lastEventTime + 65536) % 65536;
 
-                        const timeInSeconds = timeDiff / 1024;
-                        if (timeInSeconds > 0) {
-                            const rpm = Math.round((revDiff / timeInSeconds) * 60);
-                            // Only update if RPM is realistic (under 200)
-                            if (rpm < 200) {
-                                rpmDisplay.textContent = rpm;
-                            }
+                        if (timeDiff > 0) {
+                            // 1024 is the standard Bluetooth frequency for these sensors
+                            const rpm = Math.round((revDiff * 60 * 1024) / timeDiff);
+                            rpmDisplay.textContent = rpm;
+                            status.textContent = "Receiving Data";
                         }
+                        
+                        lastRevCount = revCount;
+                        lastEventTime = eventTime;
                     }
-                    lastRevCount = revCount;
-                    lastEventTime = eventTime;
                 });
             } catch (e) {
                 status.textContent = "Error: " + e.message;
