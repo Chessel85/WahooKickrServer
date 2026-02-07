@@ -3,73 +3,67 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cadence Discovery Tool</title>
+    <title>Cadence Debug 2.0</title>
     <style>
-        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #00ff00; }
+        body { font-family: monospace; padding: 20px; background: #000; color: #0f0; }
         button { 
-            width: 100%; padding: 20px; font-size: 1.2rem; font-weight: bold;
-            background: #333; color: #00ff00; border: 2px solid #00ff00; border-radius: 10px;
+            width: 100%; padding: 25px; font-size: 1.5rem; font-weight: bold;
+            background: #222; color: #0f0; border: 3px solid #0f0; border-radius: 15px;
         }
-        #log { margin-top: 20px; white-space: pre-wrap; border-top: 1px solid #444; padding-top: 10px; font-size: 0.9rem; }
-        .success { color: #55ff55; }
-        .data { color: #ffff00; font-weight: bold; }
+        #log { margin-top: 20px; white-space: pre-wrap; font-size: 1.1rem; }
+        .data-line { color: #ffff00; border-left: 4px solid #ffff00; padding-left: 10px; margin: 5px 0; }
     </style>
 </head>
 <body>
 
-    <button id="scanBtn">SCAN FOR CADENCE SENSOR</button>
-    <div id="log">Logs will appear here...</div>
+    <button id="scanBtn">CONNECT WAHOO SENSOR</button>
+    <div id="log">Status: Tap button to begin.</div>
 
     <script>
         const log = (msg, isData = false) => {
             const div = document.createElement('div');
-            if (isData) div.className = 'data';
+            if (isData) div.className = 'data-line';
             div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
             document.getElementById('log').prepend(div);
         };
 
         document.getElementById('scanBtn').addEventListener('click', async () => {
             try {
-                log("Requesting any device (filters: CSC Service 0x1816)...");
-                
-                // We filter for the standard Cycling Speed and Cadence service
+                log("Searching for Wahoo BlueSC...");
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ services: [0x1816] }],
-                    optionalServices: ['battery_service', 'device_information']
+                    optionalServices: ['battery_service']
                 });
 
-                log(`Connected to: ${device.name}`);
                 const server = await device.gatt.connect();
+                log("Connected to " + device.name);
+
+                const service = await server.getPrimaryService(0x1816);
+                const characteristic = await service.getCharacteristic(0x2A5B);
                 
-                log("Discovering Services...");
-                const services = await server.getPrimaryServices();
-                
-                for (const service of services) {
-                    log(`> Service: ${service.uuid}`);
-                    const characteristics = await service.getCharacteristics();
-                    
-                    for (const char of characteristics) {
-                        log(`  >> Char: ${char.uuid} [${Object.keys(char.properties).filter(p => char.properties[p]).join(', ')}]`);
-                        
-                        // If it's the standard CSC Measurement characteristic, start notifications
-                        if (char.uuid.includes('2a5b')) {
-                            log("Found CSC Measurement! Starting notifications...", true);
-                            await char.startNotifications();
-                            char.addEventListener('characteristicvaluechanged', (event) => {
-                                const value = event.target.value;
-                                // Convert raw bytes to hex string for easy debugging
-                                let hex = [];
-                                for (let i = 0; i < value.byteLength; i++) {
-                                    hex.push('0x' + ('00' + value.getUint8(i).toString(16)).slice(-2).toUpperCase());
-                                }
-                                log(`RAW DATA: ${hex.join(' ')}`, true);
-                            });
-                        }
+                await characteristic.startNotifications();
+                log("Listening for data... START PEDALLING NOW.");
+
+                // Heartbeat to confirm connection is still alive if no data comes in
+                setInterval(() => {
+                    if (device.gatt.connected) {
+                        console.log("Keep-alive: Connection active.");
+                    } else {
+                        log("CONNECTION LOST");
                     }
-                }
+                }, 5000);
+
+                characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    const value = event.target.value;
+                    let hex = [];
+                    for (let i = 0; i < value.byteLength; i++) {
+                        hex.push('0x' + ('00' + value.getUint8(i).toString(16)).slice(-2).toUpperCase());
+                    }
+                    log(`RAW DATA: ${hex.join(' ')}`, true);
+                });
+
             } catch (error) {
                 log("ERROR: " + error.message);
-                console.error(error);
             }
         });
     </script>
