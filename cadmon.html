@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cadence Discovery Tool</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #00ff00; }
+        button { 
+            width: 100%; padding: 20px; font-size: 1.2rem; font-weight: bold;
+            background: #333; color: #00ff00; border: 2px solid #00ff00; border-radius: 10px;
+        }
+        #log { margin-top: 20px; white-space: pre-wrap; border-top: 1px solid #444; padding-top: 10px; font-size: 0.9rem; }
+        .success { color: #55ff55; }
+        .data { color: #ffff00; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <button id="scanBtn">SCAN FOR CADENCE SENSOR</button>
+    <div id="log">Logs will appear here...</div>
+
+    <script>
+        const log = (msg, isData = false) => {
+            const div = document.createElement('div');
+            if (isData) div.className = 'data';
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            document.getElementById('log').prepend(div);
+        };
+
+        document.getElementById('scanBtn').addEventListener('click', async () => {
+            try {
+                log("Requesting any device (filters: CSC Service 0x1816)...");
+                
+                // We filter for the standard Cycling Speed and Cadence service
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [0x1816] }],
+                    optionalServices: ['battery_service', 'device_information']
+                });
+
+                log(`Connected to: ${device.name}`);
+                const server = await device.gatt.connect();
+                
+                log("Discovering Services...");
+                const services = await server.getPrimaryServices();
+                
+                for (const service of services) {
+                    log(`> Service: ${service.uuid}`);
+                    const characteristics = await service.getCharacteristics();
+                    
+                    for (const char of characteristics) {
+                        log(`  >> Char: ${char.uuid} [${Object.keys(char.properties).filter(p => char.properties[p]).join(', ')}]`);
+                        
+                        // If it's the standard CSC Measurement characteristic, start notifications
+                        if (char.uuid.includes('2a5b')) {
+                            log("Found CSC Measurement! Starting notifications...", true);
+                            await char.startNotifications();
+                            char.addEventListener('characteristicvaluechanged', (event) => {
+                                const value = event.target.value;
+                                // Convert raw bytes to hex string for easy debugging
+                                let hex = [];
+                                for (let i = 0; i < value.byteLength; i++) {
+                                    hex.push('0x' + ('00' + value.getUint8(i).toString(16)).slice(-2).toUpperCase());
+                                }
+                                log(`RAW DATA: ${hex.join(' ')}`, true);
+                            });
+                        }
+                    }
+                }
+            } catch (error) {
+                log("ERROR: " + error.message);
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+</html>
