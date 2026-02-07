@@ -5,60 +5,59 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cadence Monitor</title>
     <style>
-        body { font-family: system-ui, sans-serif; padding: 20px; text-align: center; }
-        #connectBtn { 
+        body { font-family: sans-serif; padding: 20px; text-align: center; background: #fff; color: #000; }
+        button { 
             width: 100%; padding: 25px; font-size: 1.4rem; font-weight: bold;
-            border: 3px solid #000; border-radius: 15px; background: #e7f3ff;
+            border: 2px solid #000; border-radius: 10px; background: #eee;
         }
-        #rpmDisplay { font-size: 6rem; font-weight: bold; display: block; margin: 20px 0; }
-        #status { margin-top: 20px; font-style: italic; color: #555; }
+        .display-area { margin-top: 40px; }
+        #rpmDisplay { font-size: 5rem; font-weight: bold; display: block; }
+        #status { margin-top: 20px; font-size: 1rem; color: #444; }
     </style>
 </head>
 <body>
 
-    <button id="connectBtn">Connect Sensor</button>
+    <button id="scanBtn">Connect Wahoo Sensor</button>
 
-    <div role="main">
+    <div class="display-area" role="main">
         <p>Current Cadence</p>
         <strong id="rpmDisplay" aria-live="polite">--</strong>
         <p>RPM</p>
     </div>
 
-    <div id="status">Status: Ready. Tap button and select your Wahoo.</div>
+    <div id="status">Status: Ready</div>
 
     <script>
         let lastRevCount = -1;
         let lastEventTime = -1;
-
         const rpmDisplay = document.getElementById('rpmDisplay');
         const status = document.getElementById('status');
 
-        document.getElementById('connectBtn').addEventListener('click', async () => {
+        document.getElementById('scanBtn').addEventListener('click', async () => {
             try {
-                status.textContent = "Opening device list...";
+                status.textContent = "Searching...";
                 
-                // Broad search: Accept all devices to ensure the Wahoo shows up
+                // Using the exact filter logic from the diagnostic script
                 const device = await navigator.bluetooth.requestDevice({
-                    acceptAllDevices: true,
-                    optionalServices: [0x1816] // We still need permission to talk to the cycling service
+                    filters: [{ services: [0x1816] }]
                 });
 
-                status.textContent = "Connecting to " + device.name + "...";
                 const server = await device.gatt.connect();
-                
-                status.textContent = "Setting up Cadence...";
+                status.textContent = "Connected: " + device.name;
+
                 const service = await server.getPrimaryService(0x1816);
-                const char = await service.getCharacteristic(0x2A5B);
+                const characteristic = await service.getCharacteristic(0x2A5B);
                 
-                await char.startNotifications();
-                status.textContent = "Connected! Pedal to see RPM.";
+                await characteristic.startNotifications();
+                status.textContent = "Listening... Pedal now.";
                 rpmDisplay.textContent = "0";
 
-                char.addEventListener('characteristicvaluechanged', (event) => {
-                    const data = event.target.value;
-                    // Combo sensor (Flag 0x03) puts cadence at offset 7
-                    const revCount = data.getUint16(7, true);
-                    const eventTime = data.getUint16(9, true);
+                characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    const value = event.target.value;
+                    
+                    // Wahoo BlueSC (Flag 0x03) puts Cadence data at byte 7
+                    const revCount = value.getUint16(7, true);
+                    const eventTime = value.getUint16(9, true);
 
                     if (lastRevCount !== -1 && revCount !== lastRevCount) {
                         let revDiff = revCount - lastRevCount;
@@ -73,11 +72,13 @@
                             rpmDisplay.textContent = rpm;
                         }
                     }
+                    
                     lastRevCount = revCount;
                     lastEventTime = eventTime;
                 });
-            } catch (e) {
-                status.textContent = "Connection failed: " + e.message;
+
+            } catch (error) {
+                status.textContent = "Error: " + error.message;
             }
         });
     </script>
