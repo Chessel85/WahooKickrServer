@@ -3,67 +3,59 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cadence Debug 2.0</title>
+    <title>Cadence Diagnostic</title>
     <style>
-        body { font-family: monospace; padding: 20px; background: #000; color: #0f0; }
+        body { font-family: sans-serif; padding: 15px; background: #fff; color: #000; }
         button { 
-            width: 100%; padding: 25px; font-size: 1.5rem; font-weight: bold;
-            background: #222; color: #0f0; border: 3px solid #0f0; border-radius: 15px;
+            width: 100%; padding: 20px; font-size: 1.2rem; 
+            border: 2px solid #000; border-radius: 8px; background: #eee;
         }
-        #log { margin-top: 20px; white-space: pre-wrap; font-size: 1.1rem; }
-        .data-line { color: #ffff00; border-left: 4px solid #ffff00; padding-left: 10px; margin: 5px 0; }
+        #log { margin-top: 20px; }
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #ccc; padding: 5px 0; }
     </style>
 </head>
 <body>
 
-    <button id="scanBtn">CONNECT WAHOO SENSOR</button>
-    <div id="log">Status: Tap button to begin.</div>
+    <button id="scanBtn">Connect Wahoo Sensor</button>
+    <div id="log" role="log" aria-live="polite">Logs will appear here...</div>
 
     <script>
-        const log = (msg, isData = false) => {
+        const logContainer = document.getElementById('log');
+
+        function log(msg) {
             const div = document.createElement('div');
-            if (isData) div.className = 'data-line';
+            div.className = 'log-entry';
             div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-            document.getElementById('log').prepend(div);
-        };
+            logContainer.appendChild(div); // Standard "Append to Bottom" logic
+        }
 
         document.getElementById('scanBtn').addEventListener('click', async () => {
             try {
-                log("Searching for Wahoo BlueSC...");
+                log("Searching...");
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [0x1816] }],
-                    optionalServices: ['battery_service']
+                    filters: [{ services: [0x1816] }]
                 });
 
                 const server = await device.gatt.connect();
-                log("Connected to " + device.name);
+                log("Connected: " + device.name);
 
                 const service = await server.getPrimaryService(0x1816);
-                const characteristic = await service.getCharacteristic(0x2A5B);
+                const char = await service.getCharacteristic(0x2A5B);
                 
-                await characteristic.startNotifications();
-                log("Listening for data... START PEDALLING NOW.");
+                await char.startNotifications();
+                log("Listening... Please pedal now.");
 
-                // Heartbeat to confirm connection is still alive if no data comes in
-                setInterval(() => {
-                    if (device.gatt.connected) {
-                        console.log("Keep-alive: Connection active.");
-                    } else {
-                        log("CONNECTION LOST");
-                    }
-                }, 5000);
-
-                characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                char.addEventListener('characteristicvaluechanged', (event) => {
                     const value = event.target.value;
-                    let hex = [];
+                    let hexStrings = [];
                     for (let i = 0; i < value.byteLength; i++) {
-                        hex.push('0x' + ('00' + value.getUint8(i).toString(16)).slice(-2).toUpperCase());
+                        hexStrings.push('0x' + value.getUint8(i).toString(16).toUpperCase().padStart(2, '0'));
                     }
-                    log(`RAW DATA: ${hex.join(' ')}`, true);
+                    log(`RAW DATA: ${hexStrings.join(' ')}`);
                 });
 
             } catch (error) {
-                log("ERROR: " + error.message);
+                log("Error: " + error.message);
             }
         });
     </script>
