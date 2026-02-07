@@ -3,70 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discovery - Ada Lovelace</title>
+    <title>Cadence - Rosalind Franklin</title>
     <style>
-        body { font-family: sans-serif; padding: 15px; background: #fff; color: #000; }
-        .version { font-size: 0.9rem; font-weight: bold; color: #555; }
-        button { width: 100%; padding: 20px; font-size: 1.2rem; border: 2px solid #000; border-radius: 10px; margin: 10px 0; }
-        .method-box { border: 1px solid #000; margin-bottom: 10px; padding: 10px; }
-        .val { font-size: 1.8rem; font-weight: bold; display: block; }
+        body { font-family: system-ui, sans-serif; padding: 20px; text-align: center; background: #fff; color: #000; }
+        .version { font-size: 0.8rem; color: #888; margin-bottom: 10px; }
+        #connectBtn { 
+            width: 100%; padding: 25px; font-size: 1.4rem; font-weight: bold;
+            border: 3px solid #000; border-radius: 15px; background: #f0f7ff; 
+        }
+        .display-card { border: 4px solid #000; border-radius: 20px; margin-top: 30px; padding: 40px 10px; }
+        #rpmDisplay { font-size: 6rem; font-weight: bold; display: block; }
+        .unit { font-size: 1.5rem; color: #444; font-weight: bold; }
+        #status { margin-top: 20px; font-size: 1rem; color: #666; }
     </style>
 </head>
 <body>
 
-    <div class="version">Version: Ada Lovelace</div>
-    <button id="scanBtn">Connect Wahoo Sensor</button>
-    <div id="status" aria-live="polite">Ready.</div>
+    <div class="version">Version: Rosalind Franklin</div>
+    <button id="connectBtn">Connect Wahoo Sensor</button>
 
-    <div class="method-box">
-        <span>Method 1 (Byte 1): </span>
-        <strong id="v1" class="val" aria-live="polite">No Data</strong>
+    <div class="display-card" role="main">
+        <p class="unit">Cadence</p>
+        <strong id="rpmDisplay" aria-live="polite">--</strong>
+        <p class="unit">RPM</p>
     </div>
 
-    <div class="method-box">
-        <span>Method 2 (Byte 7): </span>
-        <strong id="v2" class="val" aria-live="polite">No Data</strong>
-    </div>
-
-    <div class="method-box">
-        <span>Method 3 (Byte 5): </span>
-        <strong id="v3" class="val" aria-live="polite">No Data</strong>
-    </div>
-
-    <div class="method-box">
-        <span>Method 4 (Byte 2): </span>
-        <strong id="v4" class="val" aria-live="polite">No Data</strong>
-    </div>
-
-    <div class="method-box">
-        <span>Method 5 (Byte 8): </span>
-        <strong id="v5" class="val" aria-live="polite">No Data</strong>
-    </div>
+    <div id="status">Status: Ready.</div>
 
     <script>
-        document.getElementById('scanBtn').addEventListener('click', async () => {
+        let lastRevCount = -1;
+        let lastEventTime = -1;
+
+        const rpmDisplay = document.getElementById('rpmDisplay');
+        const status = document.getElementById('status');
+
+        document.getElementById('connectBtn').addEventListener('click', async () => {
             try {
-                const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [0x1816] }] });
+                status.textContent = "Connecting...";
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [0x1816] }]
+                });
+
                 const server = await device.gatt.connect();
                 const service = await server.getPrimaryService(0x1816);
                 const char = await service.getCharacteristic(0x2A5B);
                 
                 await char.startNotifications();
-                document.getElementById('status').textContent = "CONNECTED. Check values below.";
+                status.textContent = "Connected. Start pedaling!";
+                rpmDisplay.textContent = "0";
 
-                char.addEventListener('characteristicvaluechanged', (e) => {
-                    const v = e.target.value;
+                char.addEventListener('characteristicvaluechanged', (event) => {
+                    const data = event.target.value;
                     
-                    // Display raw 16-bit totals at different offsets
-                    // If these numbers move while pedaling, that's our cadence!
-                    if (v.byteLength >= 3) document.getElementById('v1').textContent = v.getUint16(1, true);
-                    if (v.byteLength >= 9) document.getElementById('v2').textContent = v.getUint16(7, true);
-                    if (v.byteLength >= 7) document.getElementById('v3').textContent = v.getUint16(5, true);
-                    if (v.byteLength >= 4) document.getElementById('v4').textContent = v.getUint16(2, true);
-                    if (v.byteLength >= 10) document.getElementById('v5').textContent = v.getUint16(8, true);
+                    // We proved "Method 1" works:
+                    // Revolutions at Byte 1, Event Time at Byte 3
+                    const revCount = data.getUint16(1, true);
+                    const eventTime = data.getUint16(3, true);
+
+                    if (lastRevCount !== -1 && revCount !== lastRevCount) {
+                        let revDiff = (revCount - lastRevCount + 65536) % 65536;
+                        let timeDiff = (eventTime - lastEventTime + 65536) % 65536;
+
+                        const timeInSeconds = timeDiff / 1024;
+                        if (timeInSeconds > 0) {
+                            const rpm = Math.round((revDiff / timeInSeconds) * 60);
+                            // Only update if RPM is realistic (under 200)
+                            if (rpm < 200) {
+                                rpmDisplay.textContent = rpm;
+                            }
+                        }
+                    }
+                    lastRevCount = revCount;
+                    lastEventTime = eventTime;
                 });
-            } catch (err) {
-                document.getElementById('status').textContent = "Error: " + err.message;
+            } catch (e) {
+                status.textContent = "Error: " + e.message;
             }
         });
     </script>
