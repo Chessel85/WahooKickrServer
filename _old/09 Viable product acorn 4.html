@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KICKR Acorn4</title>
+    <style>
+        body { font-family: system-ui, sans-serif; padding: 15px; max-width: 500px; margin: auto; background: #fff; }
+        button { width: 100%; padding: 25px 10px; font-size: 1.3rem; border-radius: 12px; border: 2px solid #000; background: #f8f8f8; color: black; font-weight: bold; }
+        
+        /* Full width clock */
+        .timer-display { width: 100%; font-size: 3rem; text-align: center; margin: 10px 0; padding: 20px 0; border: 2px solid #333; border-radius: 12px; display: block; }
+        
+        /* Side-by-side buttons */
+        .button-row { display: flex; gap: 10px; width: 100%; }
+        .button-row button { flex: 1; }
+
+        .power-display { font-size: 2rem; text-align: center; margin: 15px 0; padding: 25px 0; border: 2px solid #333; border-radius: 12px; }
+        #debugLog { background: #000; color: #0f0; font-family: monospace; font-size: 10px; height: 70px; overflow-y: scroll; padding: 10px; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+    <h1 id="mainTitle">KICKR Acorn4</h1>
+
+    <button id="connectButton">Connect to KICKR</button>
+    <p id="status" role="status" style="text-align: center;">Status: Disconnected</p>
+
+    <div class="timer-display" role="timer" aria-label="Elapsed Time">
+        <strong id="timerDisplay">0:00</strong>
+    </div>
+    
+    <div class="button-row">
+        <button id="startPauseButton">Start Session</button>
+        <button id="beepToggleButton" aria-pressed="false">Beep: OFF</button>
+    </div>
+
+    <div class="power-display" id="powerRegion" aria-live="assertive" role="text">
+        <strong id="targetWattsDisplay" aria-label="Target 150 Watts">Target 150W</strong>
+    </div>
+    
+    <div class="button-row">
+        <button id="decreaseButton" aria-label="Decrease Power">- 10W</button>
+        <button id="increaseButton" aria-label="Increase Power">+ 10W</button>
+    </div>
+
+    <div id="debugLog" role="log" aria-label="System Logs">
+        [Acorn4 Ready]<br>
+    </div>
+
+    <script>
+        let controlChar = null;
+        const SERVICE_UUID = '00001818-0000-1000-8000-00805f9b34fb';
+        const CONTROL_CHAR_UUID = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
+
+        let targetWatts = 150;
+        let secondsElapsed = 0;
+        let timerInterval = null;
+        let isPaused = true;
+        let beepEnabled = false;
+        
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function log(msg) {
+            const el = document.getElementById('debugLog');
+            el.innerHTML += msg + "<br>";
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function playPip() {
+            if (!beepEnabled) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime); 
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        function updateStartButtonLabel() {
+            const btn = document.getElementById('startPauseButton');
+            if (!isPaused) {
+                btn.textContent = "Pause Session";
+            } else if (secondsElapsed > 0) {
+                btn.textContent = "Resume Session";
+            } else {
+                btn.textContent = "Start Session";
+            }
+        }
+
+        document.getElementById('startPauseButton').addEventListener('click', () => {
+            if (isPaused) {
+                isPaused = false;
+                audioCtx.resume();
+                updateStartButtonLabel();
+                timerInterval = setInterval(() => {
+                    secondsElapsed++;
+                    const mins = Math.floor(secondsElapsed / 60);
+                    const secs = secondsElapsed % 60;
+                    document.getElementById('timerDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+                    playPip();
+                }, 1000);
+            } else {
+                isPaused = true;
+                clearInterval(timerInterval);
+                updateStartButtonLabel();
+            }
+        });
+
+        document.getElementById('beepToggleButton').addEventListener('click', () => {
+            beepEnabled = !beepEnabled;
+            audioCtx.resume();
+            document.getElementById('beepToggleButton').textContent = beepEnabled ? "Beep: ON" : "Beep: OFF";
+            document.getElementById('beepToggleButton').setAttribute('aria-pressed', beepEnabled);
+        });
+
+        async function sendPower(watts) {
+            if (!controlChar) return;
+            try {
+                const data = new Uint8Array([0x42, watts & 0xFF, (watts >> 8) & 0xFF]);
+                await controlChar.writeValueWithResponse(data);
+            } catch (e) { log("Err: " + e.message); }
+        }
+
+        document.getElementById('increaseButton').addEventListener('click', () => {
+            targetWatts += 10;
+            const display = document.getElementById('targetWattsDisplay');
+            display.textContent = "Target " + targetWatts + "W";
+            display.setAttribute('aria-label', "Target " + targetWatts + " Watts");
+            sendPower(targetWatts);
+        });
+
+        document.getElementById('decreaseButton').addEventListener('click', () => {
+            targetWatts = Math.max(10, targetWatts - 10);
+            const display = document.getElementById('targetWattsDisplay');
+            display.textContent = "Target " + targetWatts + "W";
+            display.setAttribute('aria-label', "Target " + targetWatts + " Watts");
+            sendPower(targetWatts);
+        });
+
+        document.getElementById('connectButton').addEventListener('click', async () => {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: "KICKR" }],
+                    optionalServices: [SERVICE_UUID]
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
+                await controlChar.startNotifications();
+                await new Promise(r => setTimeout(r, 1000));
+                await controlChar.writeValueWithResponse(new Uint8Array([0x20, 0xEE, 0xFC]));
+                document.getElementById('status').textContent = "Status: Connected";
+                log("Unlocked.");
+                // Set initial default power to KICKR on connect
+                sendPower(targetWatts);
+            } catch (e) { log("Error: " + e.message); }
+        });
+    </script>
+</body>
+</html>

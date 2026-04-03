@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cadence Diagnostic</title>
+    <style>
+        body { font-family: sans-serif; padding: 15px; background: #fff; color: #000; }
+        button { 
+            width: 100%; padding: 20px; font-size: 1.2rem; 
+            border: 2px solid #000; border-radius: 8px; background: #eee;
+        }
+        #log { margin-top: 20px; }
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #ccc; padding: 5px 0; }
+    </style>
+</head>
+<body>
+
+    <button id="scanBtn">Connect Wahoo Sensor</button>
+    <div id="log" role="log" aria-live="polite">Logs will appear here...</div>
+
+    <script>
+        const logContainer = document.getElementById('log');
+
+        function log(msg) {
+            const div = document.createElement('div');
+            div.className = 'log-entry';
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logContainer.appendChild(div); // Standard "Append to Bottom" logic
+        }
+
+        document.getElementById('scanBtn').addEventListener('click', async () => {
+            try {
+                log("Searching...");
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [0x1816] }]
+                });
+
+                const server = await device.gatt.connect();
+                log("Connected: " + device.name);
+
+                const service = await server.getPrimaryService(0x1816);
+                const char = await service.getCharacteristic(0x2A5B);
+                
+                await char.startNotifications();
+                log("Listening... Please pedal now.");
+
+                char.addEventListener('characteristicvaluechanged', (event) => {
+                    const value = event.target.value;
+                    let hexStrings = [];
+                    for (let i = 0; i < value.byteLength; i++) {
+                        hexStrings.push('0x' + value.getUint8(i).toString(16).toUpperCase().padStart(2, '0'));
+                    }
+                    log(`RAW DATA: ${hexStrings.join(' ')}`);
+                });
+
+            } catch (error) {
+                log("Error: " + error.message);
+            }
+        });
+    </script>
+</body>
+</html>

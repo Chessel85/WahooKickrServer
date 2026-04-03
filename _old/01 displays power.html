@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KICKR Control</title>
+</head>
+<body>
+    <h1>Wahoo KICKR Dashboard</h1>
+    <button id="connectButton">Scan for KICKR</button>
+    <p id="status">Status: Disconnected</p>
+    <p id="powerDisplay">Watts: --</p>
+    <script>
+const connectButton = document.getElementById('connectButton');
+const statusText = document.getElementById('status');
+const powerDisplay = document.getElementById('powerDisplay');
+
+// Correct UUIDs
+const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
+const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
+
+connectButton.addEventListener('click', async () => {
+    try {
+        statusText.textContent = "Status: Searching...";
+        
+        // Request device with specific service filter
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{
+                services: [CYCLING_POWER_SERVICE]
+            }],
+            optionalServices: [CYCLING_POWER_SERVICE]
+        });
+        
+        const deviceName = device.name || "KICKR Device";
+        statusText.textContent = `Status: ${deviceName} Selected. Connecting...`;
+        
+        const server = await device.gatt.connect();
+        statusText.textContent = "Status: Handshaking with Trainer...";
+        
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        const service = await server.getPrimaryService(CYCLING_POWER_SERVICE);
+        const characteristic = await service.getCharacteristic(POWER_MEASUREMENT_CHAR);
+        
+        await characteristic.startNotifications();
+        statusText.textContent = "Status: Receiving Data!";
+        
+        characteristic.addEventListener('characteristicvaluechanged', (event) => {
+            const value = event.target.value;
+            const watts = value.getUint16(2, true);
+            powerDisplay.textContent = `Watts: ${watts}`;
+            
+            if (statusText.textContent !== "Status: Data Live") {
+                statusText.textContent = "Status: Data Live";
+            }
+        });
+        
+        device.addEventListener('gattserverdisconnected', () => {
+            statusText.textContent = "Status: Disconnected. Please scan again.";
+            powerDisplay.textContent = "Watts: --";
+        });
+        
+    } catch (error) {
+        statusText.textContent = "Status: Error - " + (error.message || "Unknown error");
+        console.error("Bluetooth Error:", error);
+    }
+});
+    </script>
+</body>
+</html>

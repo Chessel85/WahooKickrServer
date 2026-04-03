@@ -1,6 +1,6 @@
 # 3 min efforts 
 100,5
-StartLoop
+StartLoop,4
 230,3
 180,2
 EndLoop

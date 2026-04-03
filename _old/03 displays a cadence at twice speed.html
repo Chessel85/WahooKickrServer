@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KICKR Control</title>
+</head>
+<body>
+    <h1>Wahoo KICKR Dashboard</h1>
+    <button id="connectButton">Scan for KICKR</button>
+    <p id="status">Status: Disconnected</p>
+    
+    <p>Target Power (Watts): <span id="targetWatts">100</span></p>
+    <button id="decreaseButton" aria-label="Decrease target power by 10 watts">Minus 10</button>
+    <button id="increaseButton" aria-label="Increase target power by 10 watts">Plus 10</button>
+    
+    <p id="currentPower">Current: --</p>
+    <p id="cadenceDisplay">Cadence (RPM): --</p>
+    
+    <script>
+const connectButton = document.getElementById('connectButton');
+const statusText = document.getElementById('status');
+const targetWattsSpan = document.getElementById('targetWatts');
+const currentPowerDisplay = document.getElementById('currentPower');
+const cadenceDisplay = document.getElementById('cadenceDisplay');
+const decreaseButton = document.getElementById('decreaseButton');
+const increaseButton = document.getElementById('increaseButton');
+
+const CYCLING_POWER_SERVICE = '00001818-0000-1000-8000-00805f9b34fb';
+const POWER_MEASUREMENT_CHAR = '00002a63-0000-1000-8000-00805f9b34fb';
+
+let targetWatts = 100;
+
+decreaseButton.addEventListener('click', () => {
+    targetWatts = Math.max(10, targetWatts - 10);
+    targetWattsSpan.textContent = targetWatts;
+});
+
+increaseButton.addEventListener('click', () => {
+    targetWatts += 10;
+    targetWattsSpan.textContent = targetWatts;
+});
+
+connectButton.addEventListener('click', async () => {
+    try {
+        statusText.textContent = "Status: Searching...";
+        
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{
+                services: [CYCLING_POWER_SERVICE]
+            }],
+            optionalServices: [CYCLING_POWER_SERVICE]
+        });
+        
+        const deviceName = device.name || "KICKR Device";
+        statusText.textContent = `Status: ${deviceName} Selected. Connecting...`;
+        
+        const server = await device.gatt.connect();
+        statusText.textContent = "Status: Handshaking with Trainer...";
+        
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        const service = await server.getPrimaryService(CYCLING_POWER_SERVICE);
+        const characteristic = await service.getCharacteristic(POWER_MEASUREMENT_CHAR);
+        
+        await characteristic.startNotifications();
+        statusText.textContent = "Status: Receiving Data!";
+        
+        characteristic.addEventListener('characteristicvaluechanged', (event) => {
+            const value = event.target.value;
+            const flags = value.getUint8(0);
+            const watts = value.getUint16(2, true);
+            currentPowerDisplay.textContent = `Current: ${watts}`;
+            
+            // Try to read cadence - logging to see what data we're getting
+            console.log('Data length:', value.byteLength, 'Flags:', flags.toString(2));
+            
+            // Different possible cadence locations
+            if (value.byteLength >= 6) {
+                // Try reading as if cadence flag is set
+                if (flags & 0x04) {
+                    const cadence = value.getUint16(4, true);
+                    console.log('Cadence (method 1):', cadence);
+                    if (cadence > 0 && cadence < 300) {
+                        cadenceDisplay.textContent = `Cadence (RPM): ${cadence}`;
+                    }
+                }
+            }
+            
+            // Alternative: try reading from different byte positions
+            if (value.byteLength >= 8) {
+                const altCadence = value.getUint16(6, true);
+                console.log('Alt cadence position:', altCadence);
+            }
+        });
+        
+        device.addEventListener('gattserverdisconnected', () => {
+            statusText.textContent = "Status: Disconnected. Please scan again.";
+            currentPowerDisplay.textContent = "Current: --";
+            cadenceDisplay.textContent = "Cadence (RPM): --";
+        });
+        
+    } catch (error) {
+        statusText.textContent = "Status: Error - " + (error.message || "Unknown error");
+        console.error("Bluetooth Error:", error);
+    }
+});
+    </script>
+</body>
+</html>

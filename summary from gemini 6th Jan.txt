@@ -1,0 +1,54 @@
+ 
+Reverse Engineering Dossier: Wahoo KICKR Gen 1 (v1.5.2)
+Target Hardware: Wahoo KICKR Generation 1
+Firmware Version: 1.5.2 (Confirmed via diagnostic string 05 02 02)
+Communication Protocol: Bluetooth Low Energy (BLE)
+Primary Service: a026ee01-0a7d-4ab3-97fa-f1500f9feb8b (Wahoo Specific)
+Control Characteristic: a026e002-0a7d-4ab3-97fa-f1500f9feb8b (Read/Write/Notify)
+ 
+1. Connection & Security (SUCCESS)
+The device requires a specific handshake to unlock the Control Point. Standard FTMS or Wahoo "simple" writes return 05 (Access Denied) without this.
+• 
+Step 1 (Unlock): Write [0x20, 0xEE, 0xFC] to the Control Characteristic.
+• 
+Step 2 (Authorize): Write [0x03] to the same characteristic.
+• 
+Success Signature: Device notifies with 01 03 09. (Byte 09 is the confirmation of Master Control).
+2. Live Data Reading (SUCCESS)
+• 
+Service: 0x1818 (Cycling Power Service).
+• 
+Characteristic: 0x2a63 (Cycling Power Measurement).
+• 
+Data Format: Uint16 Little Endian at offset 2 provides instantaneous Watts. This is verified and functional.
+3. Resistance & Power Control (FAILED/PENDING)
+This is the current "brick wall." Despite having "Master Control," the trainer is not physically engaging the electromagnetic brake.
+Syntactic Results from Probes:
+• 
+Wahoo Standard (OpCodes 0x41/0x42): * Sending [0x41, level] returns 01 41 02 (Invalid Parameter).
+• 
+Sending [0x42, watts] returns 01 42 05 (Condition Not Met).
+• 
+FTMS/Standard Control (OpCodes 0x01-0x05):
+• 
+[0x04, value] (Set Resistance) returns 02 00 (Accepted/Processed).
+• 
+[0x05, value] (Set Power) returns 01 05 06 (Request Failed).
+• 
+[0x07] (Start/Resume) is acknowledged but does not seemingly change the outcome of subsequent 0x05 commands.
+Current Hypotheses for Claude to Investigate:
+1. 
+Bit-Depth/Scaling: The 0x04 command returns success (02 00), but even high values (200+) result in no physical brake change. Is the scaling 14-bit? Is there a different byte-order required?
+2. 
+Mode Switching: Firmware 1.5.2 may require a specific "Set Mode" command (perhaps OpCode 0x46 or a sub-parameter of 0x42) to transition from "Passive" to "Active" before the brake energizes.
+3. 
+The "Silent" Success: Since [0x04, 0x32] returned 02 00, the trainer believes it did something. We might be writing to the wrong characteristic for the physical actuation, or it may require a simultaneous "Keep Alive" heartbeat.
+ 
+Relevant Observations:
+• 
+The trainer responds to "Search Probes" (OpCodes 0x00 to 0x45).
+• 
+In one test, the pedaling got noticeably easier after a sweep, suggesting a Reset or Stop command (0x01 or 0x05) is functional.
+• 
+The trainer seems to be mimicking the Fitness Machine Service (FTMS) behavior but hosted on the Wahoo UUIDs.
+ 
